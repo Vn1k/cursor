@@ -33,7 +33,7 @@ nothing is left behind. After that first time only `cursor.kdl` changes.
 not a bug — restart the app, or log out and back in for everything at once.
 
 **On Hyprland, Sway and friends**, the four places that are not niri-specific
-still apply, so your apps do follow along. The compositor's own cursor picks it
+still apply, so your apps do foll\ow along. The compositor's own cursor picks it
 up at the next login. Only niri is actually tested.
 
 ## What you need

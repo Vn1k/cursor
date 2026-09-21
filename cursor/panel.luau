@@ -201,10 +201,15 @@ local function loadPreviews(index)
     render()
     return
   end
-  call(`preview {shellQuote(theme.name)}`, function(result)
+  call(`preview {shellQuote(theme.name)}`, function(result, err)
     if result ~= nil then
       previews[theme.name] = result.preview
       render()
+    elseif index == 1 then
+      -- Previews are optional: without wand the panel still lists and applies
+      -- themes, so explain the blank strips rather than failing the panel. Only
+      -- the first theme reports; a missing dependency fails all of them.
+      setStatus(err, "tertiary")
     end
     loadPreviews(index + 1)
   end)
