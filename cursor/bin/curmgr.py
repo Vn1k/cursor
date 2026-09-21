@@ -50,8 +50,10 @@ PREVIEW_SLOTS = [
 # Filename tokens -> Windows cursor role. Only used when a pack ships no .inf.
 # Ambiguous words ("pointer", "busy", "no") are deliberately absent: a wrong
 # confident guess is worse than leaving the role unmapped for the UI to fix.
+# "select" is deliberately absent: Windows ends six of its fifteen names with
+# it - Normal, Alternate, Help, Text, Precision, Link - so it identifies nothing.
 ROLE_HINTS = {
-    "arrow": ["arrow", "normal", "default", "standard", "select"],
+    "arrow": ["arrow", "normal", "default", "standard"],
     "help": ["help", "question"],
     "working": ["working", "appstarting", "starting", "progress", "background"],
     "wait": ["wait", "hourglass", "loading", "busy"],
@@ -61,11 +63,13 @@ ROLE_HINTS = {
     "unavailable": ["unavailable", "forbidden", "nodrop", "notallowed", "denied"],
     "size_ns": ["ns", "vert", "vertical", "sizens", "updown"],
     "size_ew": ["ew", "we", "horz", "horizontal", "sizewe", "leftright"],
-    "size_nwse": ["nwse", "dgn1", "diag1", "fdiag"],
-    "size_nesw": ["nesw", "dgn2", "diag2", "bdiag"],
+    "size_nwse": ["nwse", "dgn1", "diag1", "fdiag", "diagonalresize1"],
+    "size_nesw": ["nesw", "dgn2", "diag2", "bdiag", "diagonalresize2"],
     "move": ["move", "fleur", "sizeall", "pan"],
     "up_arrow": ["up", "uparrow", "alternate"],
     "link": ["link", "hand"],
+    # No "location"/"person": win2xcur has the roles but Xcursor has no name to
+    # write them under, so a hint would report a mapping that produces nothing.
 }
 
 
@@ -481,7 +485,7 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
                    filter_name="lanczos") -> dict:
     from win2xcur.parser import open_blob
     from win2xcur.parser.inf import parse_inf
-    from win2xcur.theme import WIN_CURSORS
+    from win2xcur.theme import WIN_CURSORS, XCURSOR_ALIASES
 
     root, tmp = _source_dir(source)
     try:
@@ -509,11 +513,18 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
                 break
 
         if not role_frames:
-            scored: dict[str, tuple[int, Path]] = {}
+            # Packs ship near-duplicates - "Normal Select" beside "My Melody
+            # Normal Select", "Busy" beside "Busy 2" - which score the same.
+            # Break the tie on the plainest name rather than on where a space
+            # happens to sort, which handed the arrow to "Alternate Select".
+            scored: dict[str, tuple[tuple[int, int], Path]] = {}
             for path in candidates:
                 role, score = _guess_role(path.stem)
-                if role and score > scored.get(role, (0, None))[0]:
-                    scored[role] = (score, path)
+                if not role:
+                    continue
+                key = (score, -len(re.split(r"[^a-z0-9]+", path.stem.strip().lower())))
+                if key > scored.get(role, ((0, -99), None))[0]:
+                    scored[role] = (key, path)
             for role, (_, path) in scored.items():
                 role_frames[role] = open_blob(path.read_bytes()).frames
 
@@ -527,7 +538,10 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
         return {
             "ok": True, "name": name, "method": method, "inf_error": inf_error,
             "mapped": sorted(mapped),
-            "unmapped_roles": [r for r in WIN_CURSORS if r not in mapped],
+            # Only roles the user could actually fill by renaming a file:
+            # location and person have no Xcursor name to be written under.
+            "unmapped_roles": [r for r in WIN_CURSORS
+                               if r not in mapped and r in XCURSOR_ALIASES],
             "source_files": sorted(used),
             **result,
         }

@@ -212,6 +212,42 @@ def write_inf(pack):
     (pack / "Install.inf").write_text(INF_TEMPLATE.format(value=value, strings=strings))
 
 
+WINDOWS_SCHEME_NAMES = [
+    "Normal Select", "Help Select", "Working in Background", "Busy",
+    "Precision Select", "Text Select", "Handwriting", "Unavailable",
+    "Vertical Resize", "Horizontal Resize", "Diagonal Resize 1",
+    "Diagonal Resize 2", "Move", "Alternate Select", "Link Select",
+    "Location Select", "Person Select",
+]
+
+
+def test_import_maps_real_windows_scheme_names():
+    """The names Windows itself uses, not tidy one-word stems. Six of them end
+    in 'Select', which is what made the arrow come out wrong."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        pack = home / "pack"
+        pack.mkdir(parents=True)
+        for stem in WINDOWS_SCHEME_NAMES:
+            make_cur(pack / f"{stem}.cur", size=32, hotspot=(1, 1))
+        # A character-branded duplicate, as the My Melody pack ships. The plain
+        # name has to win the arrow, not this one.
+        make_cur(pack / "My Melody Normal Select.cur", size=32, hotspot=(9, 9))
+
+        result = run(["import-win", str(pack), "--name", "SchemeTest",
+                      "--sizes", "32"], home=home)
+        assert result["method"] == "heuristic", result["method"]
+        assert result["unmapped_roles"] == [], result["unmapped_roles"]
+
+        from win2xcur.parser import open_blob
+        cursors = home / ".local/share/icons/SchemeTest/cursors"
+        arrow = open_blob((cursors / "default").read_bytes()).frames[0]
+        assert {i.hotspot for i in arrow.images} == {(1, 1)}, "arrow came from the wrong file"
+
+        # Alternate Select is the up-arrow, and must not have eaten the arrow.
+        assert (cursors / "up-arrow").exists(), sorted(p.name for p in cursors.iterdir())
+
+
 def test_import_windows_inf_pack():
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
@@ -228,8 +264,10 @@ def test_import_windows_inf_pack():
         assert result["method"] == "inf:Install.inf", result["method"]
         # the .inf names the scheme, so no --name was needed
         assert result["name"] == "Test Scheme", result["name"]
-        # every role the .inf listed came through, none left unmapped
-        assert result["unmapped_roles"] == ["location", "person"], result["unmapped_roles"]
+        # Every role the .inf listed came through. location and person are not
+        # reported: win2xcur knows them but Xcursor has no name for them, so
+        # renaming a file could never fill them.
+        assert result["unmapped_roles"] == [], result["unmapped_roles"]
         assert len(result["mapped"]) == 15, result["mapped"]
 
         from win2xcur.parser import open_blob

@@ -95,7 +95,15 @@ list".
   producing themes that look right but resolve to the wrong size.
 - `_guess_role()` only runs when a pack ships no `Install.inf`. Ambiguous tokens
   are deliberately left out of `ROLE_HINTS`: unmapped is reported to the user,
-  a wrong confident guess is not.
+  a wrong confident guess is not. `"select"` is the cautionary tale — Windows
+  ends six of its fifteen names with it, so it identified nothing and handed
+  the arrow to `Alternate Select.cur`. Test new hints against the real Windows
+  scheme names, not tidy one-word stems.
+- Equal scores are broken by the **plainest** filename — fewest tokens — so
+  `Normal Select` beats `My Melody Normal Select` and `Busy` beats `Busy 2`.
+- `location` and `person` are roles win2xcur knows and Xcursor has no name for,
+  so they get no hints and are filtered out of `unmapped_roles`: asking a user
+  to rename a file for them would be asking for the impossible.
 
 ### The panel
 
