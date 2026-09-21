@@ -1,167 +1,126 @@
-# Cursor — a Noctalia v5 plugin
+# Cursor — a Noctalia plugin
 
-Noctalia v5 has no cursor settings, so cursor state ends up scattered: niri has
-one value, GTK another, Qt a third, and the session environment a fourth. This
-plugin adds the missing panel and writes a single choice to **all five places
-at once**.
+Changing your mouse cursor on Wayland is annoying: the setting lives in five
+different places, every app reads a different one, and you end up with a mix.
+This adds a panel to Noctalia that sets all five at once — and tells you when
+they have drifted apart.
 
-It also converts Windows cursor packs (`.cur` / `.ani`, animations included)
-into proper Xcursor themes, and builds themes from your own PNGs.
+It also turns Windows cursor packs (`.cur` / `.ani`, animations and all) into
+proper Linux themes, and can build a theme from your own PNGs.
 
-## What it touches
+## What it does
 
-| Layer | File or command | Reaches | When |
-|---|---|---|---|
-| niri | `~/.config/niri/cursor.kdl` | niri, XWayland | instantly |
-| GNOME | `gsettings … cursor-theme` / `cursor-size` | GTK4, libadwaita, portals | instantly |
-| GTK | `~/.config/gtk-{3,4}.0/settings.ini` | GTK apps | on app restart |
-| Legacy | `~/.icons/default/index.theme` → `Inherits=` | Qt, SDL, Electron, XWayland | on app restart |
-| Env | `~/.config/environment.d/90-xcursor.conf` | new processes | next login |
+When you pick a theme and press **Apply**, it writes the same name and size to
+every place something might read it from:
 
-`config.kdl` is edited **once**, to add `include "cursor.kdl"`. It is backed up
-first, then `niri validate` runs; a rejected config is rolled back
-automatically. Everything after that only rewrites `cursor.kdl`.
+| Where | Reaches | Takes effect |
+| --- | --- | --- |
+| `~/.config/niri/cursor.kdl` | niri itself, X11 apps | right away |
+| `gsettings` | GTK4, libadwaita, file dialogs | right away |
+| `~/.config/gtk-{3,4}.0/settings.ini` | GTK apps | when the app restarts |
+| `~/.icons/default/index.theme` | Qt, SDL, Electron apps | when the app restarts |
+| `~/.config/environment.d/90-xcursor.conf` | everything started later | next login |
 
-Already-running apps keep the cursor they read at startup — that is Wayland,
-not a bug. The `environment.d` and `~/.icons/default` layers exist so the next
-start picks up the new theme.
+It reads all five back too, and if they disagree the panel says so. That
+disagreement is the whole reason this exists.
 
-Without a niri config the niri layer reports that and the other four still
-apply, so this is useful on other compositors too — but only niri is tested.
+**About your niri config.** It is edited exactly once, to add
+`include "cursor.kdl"`. Before touching it the plugin makes a backup and runs
+`niri validate`; if niri does not like the result, the backup is restored and
+nothing is left behind. After that first time only `cursor.kdl` changes.
+
+**Apps that are already open keep their old cursor.** That is how Wayland works,
+not a bug — restart the app, or log out and back in for everything at once.
+
+**On Hyprland, Sway and friends**, the four places that are not niri-specific
+still apply, so your apps do follow along. The compositor's own cursor picks it
+up at the next login. Only niri is actually tested.
+
+## What you need
+
+`python3` is all you need to switch themes, and every distro already has it.
+
+To get preview images, Windows pack import and PNG builds, you also need:
+
+```sh
+# Fedora
+sudo dnf install ImageMagick python3-wand zenity
+pip install --user win2xcur
+
+# Arch
+sudo pacman -S imagemagick python-wand zenity
+pip install --user win2xcur
+
+# Debian / Ubuntu
+sudo apt install imagemagick python3-wand zenity
+pip install --user win2xcur
+```
+
+`win2xcur` is not packaged by any distro, so it always comes from pip — that is
+the one step people miss. `zenity` is only for the **Folder…** buttons; without
+it you type paths by hand and everything else still works.
 
 ## Install
 
-This repo is a Noctalia plugin source, so there is nothing to clone and no
-script to run:
+There is nothing to clone and no script to run.
+
+**1.** Add this repo as a plugin source:
 
 ```sh
 noctalia msg plugins source add vn1k git https://github.com/Vn1k/cursor
+```
+
+**2.** Wait a moment. Noctalia downloads the source in the background, and until
+that finishes the plugin will not show up anywhere. Give it a minute.
+
+**3.** Turn it on:
+
+```sh
 noctalia msg plugins enable vn1k/cursor
 ```
 
-Noctalia clones the source in the background, so give it a minute: until that
-finishes, `plugins list` does not mention the plugin and `enable` has nothing to
-act on. Wait, then check Settings › Plugins.
+It now appears in Noctalia's control centre, and under Settings › Plugins.
 
-`python3` is the only hard requirement — the engine ships with the plugin as
-`cursor/bin/curmgr.py` and runs from the plugin directory, so nothing needs to
-be on `PATH`.
+## Opening it with a keybind
 
-Everything else is optional, imported lazily, and only used where it applies:
-
-| Package | Needed for |
-| --- | --- |
-| `win2xcur` | importing Windows `.cur` / `.ani` packs, and writing Xcursor files |
-| `python-wand` + `imagemagick` | resizing and rendering previews |
-| `zenity` | each tab's **Folder…** button — without it you type the path instead |
-
-Listing themes and applying one works without any of them.
-
-Every tab in the panel takes a folder, so extract an archive first. The engine
-itself still accepts a `.zip` or `.tar.*` — from the CLI, or typed into the
-field — it just is not what the button offers.
-
-Open it from the Noctalia control centre, or bind a key:
+Click the tile in the control centre, or bind a key. For niri, put this in the
+`binds { }` block of `~/.config/niri/config.kdl`:
 
 ```kdl
 Mod+Shift+M hotkey-overlay-title="Cursor" { spawn-sh "noctalia msg panel-toggle vn1k/cursor:manager"; }
 ```
 
-## The panel
-
-**Themes** lists every theme found in `~/.local/share/icons`, `~/.icons` and
-`/usr/share/icons`, each with a rendered preview strip of six cursors. Pick one,
-pick a size, press **Apply**. When the five layers disagree about what is
-currently set, a line appears above the grid saying so — that drift is the bug
-this plugin exists to fix, and it is the one thing the panel tells you that no
-other tool will.
-
-**Install theme** takes a folder holding a `cursors/` directory — the shape most
-themes you download already have — and copies it into `~/.local/share/icons`
-verbatim. Below the field is the list of themes you installed, imported or
-built. **Remove** arms on the first click and deletes on the second; there is no
-dialog, because a dialog would take focus and dismiss the panel.
-
-**Import Windows** converts a `.cur`/`.ani` pack. **Build** turns a folder of
-PNGs into a theme. Both are described under the CLI below — the panel passes the
-same arguments.
-
-## Settings
-
-In Noctalia's settings, under Plugins › Cursor.
-
-| Setting | Default | What it does |
-| --- | --- | --- |
-| Built sizes | `24,32,48,64,96` | Nominal sizes baked into every theme you import or build. `24,32,48` is faster and smaller; `24,32,48,64,96,128` is for HiDPI screens. |
-| Resampling | `lanczos` | How cursor art is scaled to those sizes. `point` keeps hard pixel edges crisp on 32×32 Windows art; `lanczos` suits anti-aliased modern packs; `mitchell` sits between them. |
-| Engine path | empty | Leave empty. Only for a checkout that keeps `curmgr` somewhere other than the plugin directory. |
-
-## Using the CLI directly
-
-The panel is a thin wrapper; every subcommand prints one JSON object. Noctalia
-keeps the plugin under `~/.local/state/noctalia/plugins/`, so the engine is
-usable from a keybind or a script — symlink it onto `PATH` if you want the short
-name used below:
+On another compositor, bind whatever key you like to:
 
 ```sh
-ln -s ~/.local/state/noctalia/plugins/materialized/vn1k/cursor/bin/curmgr.py \
-      ~/.local/bin/curmgr
+noctalia msg panel-toggle vn1k/cursor:manager
 ```
 
-```sh
-curmgr list                                   # installed themes
-curmgr current                                # what each layer says right now
-curmgr preview Adwaita                        # render a preview strip -> PNG path
-curmgr apply Bibata-Modern-Ice --size 32      # write all five layers
-curmgr install ~/Downloads/Miku-Cursor        # finished Xcursor theme -> installed
-curmgr import-win ~/Downloads/pack.zip        # Windows pack -> Xcursor theme
-curmgr build ~/art/mycursor --name MyCursor   # your PNGs -> Xcursor theme
-curmgr remove MyCursor                        # only ever from ~/.local/share/icons
-```
+## Using it
 
-`apply` also takes `--hide-when-typing` and `--hide-after-inactive-ms N`.
+**Themes** shows every cursor theme on your system with a preview of six cursors
+each. Click one, choose a size, press **Apply**. **Hide when typing** makes the
+cursor disappear while you type, and **Hide after ms** hides it after that many
+milliseconds of not moving.
 
-### Installing a finished theme
+**Install theme** is for themes you downloaded. Most of them are a folder with a
+`cursors/` folder inside — point this at it and it gets installed for your user
+only. Underneath is the list of themes this plugin installed,
+imported or built, each with a delete button: the first click arms it, the
+second one deletes. Only themes it put there can be deleted — anything from
+`/usr/share/icons` or `~/.icons` is left alone, so you cannot break what you
+installed another way.
 
-Most cursor themes you find online are already Xcursor themes — a folder with a
-`cursors/` directory inside. Point `install` at that folder, or at the `.zip`/
-`.tar.*` you downloaded, and it lands in `~/.local/share/icons`.
+**Import Windows** converts a Windows cursor pack. Nearly every pack includes an
+`Install.inf` file, and when it does everything is figured out for you, animated
+cursors included. If a download contains several variants in separate folders,
+point at the one folder you want — otherwise you get whichever it finds first.
+**Windows shadow** adds the drop shadow Windows draws automatically, which most
+packs are designed around.
 
-```sh
-curmgr install ~/Downloads/Miku-Cursor.tar.gz
-```
-
-The theme's own `Name=` becomes the directory name (`Name=Miku Cursor` gives
-`Miku-Cursor`); `--name` overrides it. Archives that hold several variants get
-all of them installed. Alias symlinks are copied as symlinks, not flattened
-into duplicates — roughly half of a real theme is symlinks.
-
-A source that turns out to be a Windows pack is rejected with a pointer to
-`import-win` rather than a confusing failure, which is what happens if you aim
-this at a repo that ships both.
-
-### Importing a Windows pack
-
-Point it at a folder, a `.zip`/`.tar.*`, or a single `.cur`/`.ani`.
-
-If the pack ships an `Install.inf` — nearly all do — the role mapping and theme
-name come straight from it. A download holding several variants ships several
-`.inf` files, and only the first one found is used, so point at the variant's own
-folder when you want a specific one. Otherwise filenames are matched against the 17
-Windows roles, and anything unrecognised is reported rather than guessed at;
-rename those files after their role and convert again.
-
-`.ani` cursors stay animated. `--shadow` bakes in the drop shadow Windows draws
-for you, which most packs assume.
-
-### Building from your own PNGs
-
-```
-mycursor/
-  spec.json
-  arrow.png
-  wait_01.png  wait_02.png  wait_03.png
-```
+**Build** makes a theme from your own PNGs. Drop them in a folder named after
+what they are, and optionally add a `spec.json` to control where the click point
+is and how animations run:
 
 ```json
 {
@@ -174,46 +133,41 @@ mycursor/
 }
 ```
 
-Without `spec.json`, filenames are read as role names, and the hotspot defaults
-to the top-left corner for pointer-like roles and the centre for the rest.
+Every tab takes a **folder**, so unzip your download first.
 
-Both paths generate every nominal size (24–96 by default), scale hotspots to
-match, and write the full alias set so `default`, `left_ptr`, `pointer`,
-`watch`, `not-allowed` and friends all resolve.
+## Settings
 
-## Architecture
+In Noctalia's settings, under Plugins › Cursor.
 
-```
-catalog.toml            source index — one row per plugin, read from the commit
-cursor/plugin.toml      Noctalia manifest: panel, control-centre tile, settings
-cursor/panel.luau       the UI — shells out to curmgr and renders its JSON
-cursor/shortcut.luau    control-centre tile
-cursor/bin/curmgr.py    the engine: discovery, previews, applying, importing, building
-cursor/test_curmgr.py   self-check, plain asserts, no framework
-```
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Built sizes | `24,32,48,64,96` | Which sizes get baked into themes you import or build. Fewer is faster and smaller; add `128` if you have a HiDPI screen. |
+| Resampling | `lanczos` | How artwork is scaled. `point` keeps pixel art sharp, which suits older Windows packs; `lanczos` suits smooth modern ones; `mitchell` is in between. |
+| Engine path | empty | Leave it empty. Only needed if you moved the engine somewhere unusual. |
 
-The `cursor/` directory is the plugin; `catalog.toml` beside it is what makes
-this repo a source Noctalia can add. That is the same layout
-[community-plugins](https://github.com/noctalia-dev/community-plugins) uses.
+## If something looks wrong
 
-The split exists because Luau cannot decode PNGs or parse cursor binaries, and
-because a cursor tool is more useful when it still works from a keybind or a
-script with the shell stopped. Binary format work is delegated entirely to
-[`win2xcur`](https://github.com/quantum5/win2xcur); nothing here parses
-`.cur`, `.ani`, or Xcursor by hand.
+**The plugin does not show up after `source add`.** The download is still
+running. Wait a minute and look again in Settings › Plugins.
 
-Nothing is compiled, so x86_64 and aarch64 behave identically. Developed and
-verified on Fedora 43 (x86_64), niri 26.04, Noctalia v5.0.0.
+**No preview images, just grey boxes.** `python-wand` and `imagemagick` are
+missing. Everything else keeps working.
 
-## Tests
+**Import or Build gives an error.** `win2xcur` is missing —
+`pip install --user win2xcur`.
 
-```sh
-python3 cursor/test_curmgr.py
-```
+**The cursor did not change in an app.** If it was already open, it keeps the
+cursor it started with. Restart it.
 
-Runs against a throwaway `$HOME` with `gsettings` on its memory backend, so the
-live session is never touched. Covers the `.cur`→Xcursor geometry round trip,
-the premultiplied-alpha invariant, `.inf` and heuristic pack imports, animated
-`.ani`, zip archives, PNG builds, alias symlink resolution, all five apply
-layers, the non-niri fallback, `niri validate` acceptance, and apply
-idempotency.
+**The panel says the layers disagree.** Something else on your system also sets
+a cursor — often a line in a shell profile or an old `XCURSOR_THEME` export.
+Pressing **Apply** again rewrites all five; if it comes back, that other thing
+is still overwriting one of them.
+
+**The Folder… button says zenity is missing.** Install `zenity`, or just type
+the path into the field above it.
+
+---
+
+Want to know how it works inside, or use the engine from a script?
+See [DEVELOPING.md](DEVELOPING.md).
