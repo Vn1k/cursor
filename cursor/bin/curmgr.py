@@ -60,13 +60,18 @@ ROLE_HINTS = {
     "crosshair": ["crosshair", "cross", "precision"],
     "text": ["text", "ibeam", "beam"],
     "pen": ["pen", "handwriting", "pencil", "write"],
-    "unavailable": ["unavailable", "forbidden", "nodrop", "notallowed", "denied"],
+    # "unava" rather than the full word: packs misspell it, and differently each
+    # time - unavaliable in one, unavailiable in another pack's .inf.
+    "unavailable": ["unava", "forbidden", "nodrop", "notallowed", "denied"],
     "size_ns": ["ns", "vert", "vertical", "sizens", "updown"],
     "size_ew": ["ew", "we", "horz", "horizontal", "sizewe", "leftright"],
-    "size_nwse": ["nwse", "dgn1", "diag1", "fdiag", "diagonalresize1"],
+    # "diagonalresize" unnumbered: some packs number only the second one. It is
+    # a substring of "diagonalresize2", so the longest-hint tie-break below is
+    # what keeps the numbered sibling on its own role.
+    "size_nwse": ["nwse", "dgn1", "diag1", "fdiag", "diagonalresize", "diagonalresize1"],
     "size_nesw": ["nesw", "dgn2", "diag2", "bdiag", "diagonalresize2"],
     "move": ["move", "fleur", "sizeall", "pan"],
-    "up_arrow": ["up", "uparrow", "alternate"],
+    "up_arrow": ["up", "uparrow", "alternate", "alternative", "alt"],
     "link": ["link", "hand"],
     # No "location"/"person": win2xcur has the roles but Xcursor has no name to
     # write them under, so a hint would report a mapping that produces nothing.
@@ -442,11 +447,13 @@ def write_theme(name: str, role_frames: dict, inherits: str = "Adwaita",
 # --------------------------------------------------------------------------
 
 def _guess_role(stem: str) -> tuple[str, int] | tuple[None, int]:
-    # ponytail: token scoring, not real matching. It only has to cover packs with
-    # no .inf; swap in edit distance if unmapped roles turn out to be common.
+    # ponytail: token scoring, not real matching. Edit distance is not the
+    # upgrade path it looks like - it would reach "unavaliable" and never reach
+    # "alt", while inviting the confident wrong guess this design avoids. Add a
+    # hint that covers a class instead.
     squashed = re.sub(r"[^a-z0-9]", "", stem.lower())
     tokens = set(re.split(r"[^a-z0-9]+", stem.lower())) - {""}
-    best, score = None, 0
+    best, score, hint_len = None, 0, 0
     for role, hints in ROLE_HINTS.items():
         for hint in hints:
             if hint in tokens:
@@ -455,8 +462,10 @@ def _guess_role(stem: str) -> tuple[str, int] | tuple[None, int]:
                 candidate = 2
             else:
                 continue
-            if candidate > score:
-                best, score = role, candidate
+            # A tie goes to the longer hint: "diagonalresize2" is more specific
+            # than "diagonalresize", and both match the numbered file.
+            if candidate > score or (candidate == score and len(hint) > hint_len):
+                best, score, hint_len = role, candidate, len(hint)
     return best, score
 
 

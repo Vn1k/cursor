@@ -248,6 +248,36 @@ def test_import_maps_real_windows_scheme_names():
         assert (cursors / "up-arrow").exists(), sorted(p.name for p in cursors.iterdir())
 
 
+def test_import_maps_abbreviated_and_misspelled_names():
+    """A real pack's second shape: lowercase, brand-prefixed, 'alt' for
+    alternate, 'unavaliable' misspelled, and only the second diagonal
+    numbered."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        pack = home / "pack"
+        pack.mkdir(parents=True)
+        for stem in ("my melo alt select", "my melo busy", "my melo diagonal resize",
+                     "my melo diagonal resize2", "my melo handwriting", "my melo help",
+                     "my melo horizontal resize", "my melo link select", "my melo move",
+                     "my melo normal", "my melo precision", "my melo text",
+                     "my melo unavaliable", "my melo vertical resize",
+                     "my melody working on background"):
+            make_cur(pack / f"{stem}.cur", size=32, hotspot=(1, 1))
+
+        result = run(["import-win", str(pack), "--name", "AbbrevTest",
+                      "--sizes", "32"], home=home)
+        assert result["method"] == "heuristic", result["method"]
+        assert result["unmapped_roles"] == [], result["unmapped_roles"]
+
+        # The two diagonals must be separate cursors: "diagonalresize" is a
+        # substring of "diagonalresize2", so a tie-break that prefers the first
+        # hint instead of the longest would point both at one file.
+        cursors = home / ".local/share/icons/AbbrevTest/cursors"
+        fdiag = (cursors / "size_fdiag").resolve()
+        bdiag = (cursors / "size_bdiag").resolve()
+        assert fdiag != bdiag, f"both diagonals resolved to {fdiag.name}"
+
+
 def test_import_windows_inf_pack():
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
