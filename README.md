@@ -31,22 +31,27 @@ apply, so this is useful on other compositors too — but only niri is tested.
 
 ## Install
 
+This repo is a Noctalia plugin source, so there is nothing to clone and no
+script to run:
+
 ```sh
-./setup.sh
+noctalia msg plugins source add vn1k git https://github.com/Vn1k/noctalia-cursor
+noctalia msg plugins enable vn1k/cursor
 ```
 
-It registers this directory as a local plugin source, enables the plugin, and
-symlinks the engine to `~/.local/bin/curmgr` so it is usable as a CLI.
-Dependencies (`ImageMagick`, `python3-wand`, `win2xcur`, `zenity`) are installed
-if missing.
+`python3` is the only hard requirement — the engine ships with the plugin as
+`cursor/bin/curmgr.py` and runs from the plugin directory, so nothing needs to
+be on `PATH`.
 
-The panel does not need that symlink: it runs `bin/curmgr.py` out of the plugin
-directory, so `python3` is the only hard requirement. Everything else is needed
-only for importing and building, and is imported lazily.
+Everything else is optional, imported lazily, and only used where it applies:
 
-Only `zenity` is optional: it backs each tab's **Folder…** button. Without it
-that button reports it is missing and you type the path instead; everything else
-still works.
+| Package | Needed for |
+| --- | --- |
+| `win2xcur` | importing Windows `.cur` / `.ani` packs, and writing Xcursor files |
+| `python-wand` + `imagemagick` | resizing and rendering previews |
+| `zenity` | each tab's **Folder…** button — without it you type the path instead |
+
+Listing themes and applying one works without any of them.
 
 Every tab in the panel takes a folder, so extract an archive first. The engine
 itself still accepts a `.zip` or `.tar.*` — from the CLI, or typed into the
@@ -60,7 +65,15 @@ Mod+Shift+M hotkey-overlay-title="Cursor" { spawn-sh "noctalia msg panel-toggle 
 
 ## Using the CLI directly
 
-The panel is a thin wrapper; every subcommand prints one JSON object.
+The panel is a thin wrapper; every subcommand prints one JSON object. Noctalia
+keeps the plugin under `~/.local/state/noctalia/plugins/`, so the engine is
+usable from a keybind or a script — symlink it onto `PATH` if you want the short
+name used below:
+
+```sh
+ln -s ~/.local/state/noctalia/plugins/materialized/vn1k/cursor/bin/curmgr.py \
+      ~/.local/bin/curmgr
+```
 
 ```sh
 curmgr list                                   # installed themes
@@ -135,12 +148,17 @@ match, and write the full alias set so `default`, `left_ptr`, `pointer`,
 ## Architecture
 
 ```
-plugin.toml      Noctalia manifest: panel, control-centre tile, settings
-panel.luau       the UI — shells out to curmgr and renders its JSON
-shortcut.luau    control-centre tile
-bin/curmgr.py    the engine: discovery, previews, applying, importing, building
-test_curmgr.py   self-check, plain asserts, no framework
+catalog.toml            source index — one row per plugin, read from the commit
+cursor/plugin.toml      Noctalia manifest: panel, control-centre tile, settings
+cursor/panel.luau       the UI — shells out to curmgr and renders its JSON
+cursor/shortcut.luau    control-centre tile
+cursor/bin/curmgr.py    the engine: discovery, previews, applying, importing, building
+cursor/test_curmgr.py   self-check, plain asserts, no framework
 ```
+
+The `cursor/` directory is the plugin; `catalog.toml` beside it is what makes
+this repo a source Noctalia can add. That is the same layout
+[community-plugins](https://github.com/noctalia-dev/community-plugins) uses.
 
 The split exists because Luau cannot decode PNGs or parse cursor binaries, and
 because a cursor tool is more useful when it still works from a keybind or a
@@ -154,7 +172,7 @@ verified on Fedora Asahi Remix 44 (aarch64), niri 26.04, Noctalia v5.1.0.
 ## Tests
 
 ```sh
-python3 test_curmgr.py
+python3 cursor/test_curmgr.py
 ```
 
 Runs against a throwaway `$HOME` with `gsettings` on its memory backend, so the

@@ -7,10 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Nothing is compiled and there is no package manager, linter or CI here.
 
 ```sh
-./setup.sh                 # install deps, symlink bin/curmgr.py -> ~/.local/bin/curmgr, register+enable the plugin
-python3 test_curmgr.py     # whole self-check
-python3 -c 'import test_curmgr as t; t.test_import_windows_inf_pack()'   # one test
+python3 cursor/test_curmgr.py    # whole self-check
+cd cursor && python3 -c 'import test_curmgr as t; t.test_import_windows_inf_pack()'   # one test
 ```
+
+Installing is `noctalia msg plugins source add <name> git <url>` then
+`plugins enable vn1k/cursor`; for local work point a `path` source at this
+checkout instead, since a git source is read from the pushed commit.
 
 `test_curmgr.py` has no framework: `main()` collects every `test_*` global, runs
 each, prints ok/FAIL, exits non-zero if any failed. Each test builds its own
@@ -19,17 +22,24 @@ throwaway `$HOME` (see the `run()` helper, which also forces
 test on that helper rather than calling curmgr with the real environment.
 
 Reloading the plugin after an edit: `noctalia msg config-reload`, then reopen the
-panel (setup.sh symlinks the checkout, so edits are live without reinstalling).
+panel. Edits are live only when the plugin is installed from a `path` source
+pointing at this checkout; a git source serves the last pushed commit.
 
 ## Architecture
 
 Two halves, split on purpose: **Luau cannot decode PNGs or parse cursor
 binaries**, and the tool must still work from a keybind with the shell stopped.
 
-- `bin/curmgr.py` — the engine. All filesystem and config writes live here.
-- `panel.luau` / `shortcut.luau` — UI only. Shells out to curmgr, renders JSON.
-- `plugin.toml` — Noctalia manifest (panel, control-centre tile, settings keys).
-- `translations/{en,id}.json` — every UI string. Single-segment keys are flat;
+The repo is a plugin **source**: `catalog.toml` at the root indexes it, and the
+plugin itself lives in `cursor/`. Noctalia reads the catalog with
+`git show HEAD:catalog.toml`, so a bump only lands once pushed — and `version`
+therefore lives in two files, `catalog.toml` and `cursor/plugin.toml`. Keep them
+in step.
+
+- `cursor/bin/curmgr.py` — the engine. All filesystem and config writes live here.
+- `cursor/panel.luau` / `cursor/shortcut.luau` — UI only. Shells out to curmgr, renders JSON.
+- `cursor/plugin.toml` — Noctalia manifest (panel, control-centre tile, settings keys).
+- `cursor/translations/{en,id}.json` — every UI string. Single-segment keys are flat;
   anything dotted (the `settings.*` keys `plugin.toml` references) is **nested
   objects**, because the plugin store rejects a dot inside a JSON key.
 

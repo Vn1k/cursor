@@ -834,7 +834,7 @@ def main(argv=None) -> int:
         return 1
     except ImportError as exc:
         json.dump({"ok": False, "error": f"missing dependency: {exc}. "
-                                         "Run setup.sh to install win2xcur and ImageMagick."},
+                                         "Install win2xcur, python-wand and ImageMagick."},
                   sys.stdout)
         print()
         return 1
