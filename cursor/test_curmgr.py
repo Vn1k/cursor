@@ -278,6 +278,29 @@ def test_import_maps_abbreviated_and_misspelled_names():
         assert fdiag != bdiag, f"both diagonals resolved to {fdiag.name}"
 
 
+def test_a_file_named_after_its_role_wins():
+    """The escape hatch the panel advertises: rename the file to the role name.
+    It has to hold for every role, or the advice is a trap."""
+    from win2xcur.theme import WIN_CURSORS, XCURSOR_ALIASES
+    roles = [r for r in WIN_CURSORS if r in XCURSOR_ALIASES]
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        pack = home / "pack"
+        pack.mkdir(parents=True)
+        for role in roles:
+            make_cur(pack / f"{role}.cur", size=32, hotspot=(1, 1))
+
+        result = run(["import-win", str(pack), "--name", "ByRole",
+                      "--sizes", "32"], home=home)
+        assert result["unmapped_roles"] == [], result["unmapped_roles"]
+        assert set(result["mapped"]) == set(roles), sorted(set(roles) - set(result["mapped"]))
+
+        # up_arrow is the one that used to be swallowed by arrow, and the
+        # failure is silent: both roles end up on one file.
+        cursors = home / ".local/share/icons/ByRole/cursors"
+        assert (cursors / "default").resolve() != (cursors / "up-arrow").resolve()
+
+
 def test_import_windows_inf_pack():
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)

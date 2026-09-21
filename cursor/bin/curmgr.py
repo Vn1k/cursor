@@ -452,6 +452,13 @@ def _guess_role(stem: str) -> tuple[str, int] | tuple[None, int]:
     # "alt", while inviting the confident wrong guess this design avoids. Add a
     # hint that covers a class instead.
     squashed = re.sub(r"[^a-z0-9]", "", stem.lower())
+    # A file named after its role always wins. This is the escape hatch the
+    # panel tells users about ("rename those files after their role"), and
+    # without it up_arrow.cur loses to `arrow`, whose hint is a whole token
+    # inside the name - costing the user the pointer they were fixing.
+    for role in ROLE_HINTS:
+        if squashed == re.sub(r"[^a-z0-9]", "", role):
+            return role, 4
     tokens = set(re.split(r"[^a-z0-9]+", stem.lower())) - {""}
     best, score, hint_len = None, 0, 0
     for role, hints in ROLE_HINTS.items():

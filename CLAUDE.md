@@ -101,6 +101,12 @@ list".
   scheme names, not tidy one-word stems.
 - Equal scores are broken by the **plainest** filename — fewest tokens — so
   `Normal Select` beats `My Melody Normal Select` and `Busy` beats `Busy 2`.
+  Between two hints of equal score the **longer** one wins, which is what keeps
+  `diagonalresize2` off the role `diagonalresize` matches.
+- A filename equal to a role name short-circuits with score 4, above any hint.
+  That is what makes the panel's "rename those files after their role" advice
+  true — without it `up_arrow.cur` goes to `arrow`, since `arrow` is a token
+  inside the name. Do not let a new hint outrank it.
 - `location` and `person` are roles win2xcur knows and Xcursor has no name for,
   so they get no hints and are filtered out of `unmapped_roles`: asking a user
   to rename a file for them would be asking for the impossible.
