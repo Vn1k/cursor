@@ -39,6 +39,10 @@ noctalia msg plugins source add vn1k git https://github.com/Vn1k/cursor
 noctalia msg plugins enable vn1k/cursor
 ```
 
+Noctalia clones the source in the background, so give it a minute: until that
+finishes, `plugins list` does not mention the plugin and `enable` has nothing to
+act on. Wait, then check Settings › Plugins.
+
 `python3` is the only hard requirement — the engine ships with the plugin as
 `cursor/bin/curmgr.py` and runs from the plugin directory, so nothing needs to
 be on `PATH`.
@@ -63,6 +67,35 @@ Open it from the Noctalia control centre, or bind a key:
 Mod+Shift+M hotkey-overlay-title="Cursor" { spawn-sh "noctalia msg panel-toggle vn1k/cursor:manager"; }
 ```
 
+## The panel
+
+**Themes** lists every theme found in `~/.local/share/icons`, `~/.icons` and
+`/usr/share/icons`, each with a rendered preview strip of six cursors. Pick one,
+pick a size, press **Apply**. When the five layers disagree about what is
+currently set, a line appears above the grid saying so — that drift is the bug
+this plugin exists to fix, and it is the one thing the panel tells you that no
+other tool will.
+
+**Install theme** takes a folder holding a `cursors/` directory — the shape most
+themes you download already have — and copies it into `~/.local/share/icons`
+verbatim. Below the field is the list of themes you installed, imported or
+built. **Remove** arms on the first click and deletes on the second; there is no
+dialog, because a dialog would take focus and dismiss the panel.
+
+**Import Windows** converts a `.cur`/`.ani` pack. **Build** turns a folder of
+PNGs into a theme. Both are described under the CLI below — the panel passes the
+same arguments.
+
+## Settings
+
+In Noctalia's settings, under Plugins › Cursor.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Built sizes | `24,32,48,64,96` | Nominal sizes baked into every theme you import or build. `24,32,48` is faster and smaller; `24,32,48,64,96,128` is for HiDPI screens. |
+| Resampling | `lanczos` | How cursor art is scaled to those sizes. `point` keeps hard pixel edges crisp on 32×32 Windows art; `lanczos` suits anti-aliased modern packs; `mitchell` sits between them. |
+| Engine path | empty | Leave empty. Only for a checkout that keeps `curmgr` somewhere other than the plugin directory. |
+
 ## Using the CLI directly
 
 The panel is a thin wrapper; every subcommand prints one JSON object. Noctalia
@@ -78,6 +111,7 @@ ln -s ~/.local/state/noctalia/plugins/materialized/vn1k/cursor/bin/curmgr.py \
 ```sh
 curmgr list                                   # installed themes
 curmgr current                                # what each layer says right now
+curmgr preview Adwaita                        # render a preview strip -> PNG path
 curmgr apply Bibata-Modern-Ice --size 32      # write all five layers
 curmgr install ~/Downloads/Miku-Cursor        # finished Xcursor theme -> installed
 curmgr import-win ~/Downloads/pack.zip        # Windows pack -> Xcursor theme
@@ -111,7 +145,9 @@ this at a repo that ships both.
 Point it at a folder, a `.zip`/`.tar.*`, or a single `.cur`/`.ani`.
 
 If the pack ships an `Install.inf` — nearly all do — the role mapping and theme
-name come straight from it. Otherwise filenames are matched against the 17
+name come straight from it. A download holding several variants ships several
+`.inf` files, and only the first one found is used, so point at the variant's own
+folder when you want a specific one. Otherwise filenames are matched against the 17
 Windows roles, and anything unrecognised is reported rather than guessed at;
 rename those files after their role and convert again.
 
@@ -167,7 +203,7 @@ script with the shell stopped. Binary format work is delegated entirely to
 `.cur`, `.ani`, or Xcursor by hand.
 
 Nothing is compiled, so x86_64 and aarch64 behave identically. Developed and
-verified on Fedora Asahi Remix 44 (aarch64), niri 26.04, Noctalia v5.1.0.
+verified on Fedora 43 (x86_64), niri 26.04, Noctalia v5.0.0.
 
 ## Tests
 
@@ -179,4 +215,5 @@ Runs against a throwaway `$HOME` with `gsettings` on its memory backend, so the
 live session is never touched. Covers the `.cur`→Xcursor geometry round trip,
 the premultiplied-alpha invariant, `.inf` and heuristic pack imports, animated
 `.ani`, zip archives, PNG builds, alias symlink resolution, all five apply
-layers, `niri validate` acceptance, and apply idempotency.
+layers, the non-niri fallback, `niri validate` acceptance, and apply
+idempotency.
