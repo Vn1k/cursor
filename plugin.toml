@@ -1,19 +1,21 @@
-id = "vinik/cursor"
+id = "vn1k/cursor"
 name = "Cursor"
-version = "0.1.0"
-plugin_api = 22
-author = "vinik"
+version = "1.0.0"
+plugin_api = 8
+author = "Vn1k"
 license = "MIT"
-icon = "cursor"
+icon = "pointer"
 description = "Pick, import and build cursor themes, then apply them everywhere at once."
-tags = ["appearance", "cursor", "theme", "utility"]
+tags = ["panel", "shortcut", "theming", "utility", "niri"]
 
-# curmgr owns every cursor file and every config write. This plugin runs it and
-# draws the JSON it prints, so nothing here needs to know a binary format.
-dependencies = ["curmgr"]
+# bin/curmgr.py owns every cursor file and every config write; this plugin runs
+# it and draws the JSON it prints, so nothing here needs to know a binary
+# format. Only python3 is needed to switch themes - the rest are for importing
+# Windows packs and building themes from PNGs, and are imported lazily.
+dependencies = ["python3", "win2xcur", "python-wand", "imagemagick", "zenity"]
 
-# Only needed when curmgr is not on PATH, e.g. a checkout that was never
-# installed with setup.sh.
+# The engine ships in the plugin directory, so this is only for a checkout that
+# keeps curmgr somewhere else.
 [[setting]]
 key = "engine_path"
 type = "string"

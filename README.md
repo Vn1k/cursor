@@ -26,15 +26,23 @@ Already-running apps keep the cursor they read at startup — that is Wayland,
 not a bug. The `environment.d` and `~/.icons/default` layers exist so the next
 start picks up the new theme.
 
+Without a niri config the niri layer reports that and the other four still
+apply, so this is useful on other compositors too — but only niri is tested.
+
 ## Install
 
 ```sh
 ./setup.sh
 ```
 
-It installs the engine as `~/.local/bin/curmgr`, registers this directory as a
-local plugin source, and enables the plugin. Dependencies (`ImageMagick`,
-`python3-wand`, `win2xcur`, `zenity`) are installed if missing.
+It registers this directory as a local plugin source, enables the plugin, and
+symlinks the engine to `~/.local/bin/curmgr` so it is usable as a CLI.
+Dependencies (`ImageMagick`, `python3-wand`, `win2xcur`, `zenity`) are installed
+if missing.
+
+The panel does not need that symlink: it runs `bin/curmgr.py` out of the plugin
+directory, so `python3` is the only hard requirement. Everything else is needed
+only for importing and building, and is imported lazily.
 
 Only `zenity` is optional: it backs the panel's **Folder…** / **Archive…**
 buttons. Without it those buttons report it is missing and you type the path
@@ -43,7 +51,7 @@ instead; everything else still works.
 Open it from the Noctalia control centre, or bind a key:
 
 ```kdl
-Mod+Shift+M hotkey-overlay-title="Cursor" { spawn-sh "noctalia msg panel-toggle vinik/cursor:manager"; }
+Mod+Shift+M hotkey-overlay-title="Cursor" { spawn-sh "noctalia msg panel-toggle vn1k/cursor:manager"; }
 ```
 
 ## Using the CLI directly

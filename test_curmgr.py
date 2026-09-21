@@ -385,6 +385,17 @@ def test_apply_comments_out_a_conflicting_cursor_block():
         assert proc.returncode == 0, proc.stderr[-500:]
 
 
+def test_apply_without_niri_still_ok():
+    """Hyprland, Sway and friends: no niri config, four portable layers."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        result = run(["apply", "Adwaita", "--size", "32"], home=home)
+        assert not result["layers"]["niri"]["ok"], "niri layer should report it found no config"
+        assert result["layers"]["gtk"]["ok"], result["layers"]["gtk"]
+        assert result["layers"]["xdg_default"]["ok"], result["layers"]["xdg_default"]
+        assert result["layers"]["environment"]["ok"], result["layers"]["environment"]
+
+
 def test_apply_rejects_unknown_theme():
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)

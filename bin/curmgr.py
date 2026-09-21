@@ -338,7 +338,11 @@ def apply_theme(theme: str, size: int, hide_typing: bool, hide_ms: int) -> dict:
         "xdg_default": _apply_xdg_default(theme),
         "environment": _apply_environment(theme, size),
     }
-    return {"ok": layers["niri"]["ok"], "theme": theme, "size": size, "layers": layers}
+    # Off niri the niri layer can never succeed, but the four portable layers
+    # still change the cursor, so gate on niri only where a niri config exists.
+    ok = (layers["niri"]["ok"] if NIRI_CONFIG.is_file()
+          else any(layer["ok"] for name, layer in layers.items() if name != "niri"))
+    return {"ok": ok, "theme": theme, "size": size, "layers": layers}
 
 
 # --------------------------------------------------------------------------

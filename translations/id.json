@@ -12,7 +12,7 @@
   "convert": "Konversi",
   "converting": "Mengonversi…",
   "drift": "Lapisan tidak sinkron — terapkan tema untuk menyelaraskan niri, GTK, dan Qt.",
-  "engine_missing": "curmgr tidak ditemukan. Jalankan setup.sh, atau isi path engine di pengaturan.",
+  "engine_missing": "Engine kursor gagal dijalankan. Pastikan python3 terpasang.",
   "error": "Terjadi kesalahan",
   "hide_after_ms": "Sembunyikan setelah ms",
   "hide_when_typing": "Sembunyikan saat mengetik",
@@ -50,16 +50,28 @@
   "title": "Kursor",
   "unmapped": "Tidak dikenali",
   "unmapped_hint": "Ganti nama file sesuai perannya, atau sertakan Install.inf, lalu konversi ulang.",
-  "settings.engine_path.label": "Path engine",
-  "settings.engine_path.description": "Hanya perlu diisi kalau curmgr tidak ada di PATH.",
-  "settings.build_sizes.label": "Ukuran yang dibangun",
-  "settings.build_sizes.description": "Ukuran nominal yang ditanam ke tema hasil impor atau build.",
-  "settings.build_sizes.option.small": "Kecil (24, 32, 48)",
-  "settings.build_sizes.option.standard": "Standar (24-96)",
-  "settings.build_sizes.option.hidpi": "HiDPI (24-128)",
-  "settings.scale_filter.label": "Resampling",
-  "settings.scale_filter.description": "Cara kursor diperbesar. Point menjaga pixel art tetap tajam; Lanczos cocok untuk gambar halus.",
-  "settings.scale_filter.option.lanczos": "Lanczos (halus)",
-  "settings.scale_filter.option.point": "Point (pixel art)",
-  "settings.scale_filter.option.mitchell": "Mitchell (seimbang)"
+  "settings": {
+    "engine_path": {
+      "label": "Path engine",
+      "description": "Biarkan kosong. Hanya untuk checkout yang menaruh curmgr di tempat lain."
+    },
+    "build_sizes": {
+      "label": "Ukuran yang dibangun",
+      "description": "Ukuran nominal yang ditanam ke tema hasil impor atau build.",
+      "option": {
+        "small": "Kecil (24, 32, 48)",
+        "standard": "Standar (24-96)",
+        "hidpi": "HiDPI (24-128)"
+      }
+    },
+    "scale_filter": {
+      "label": "Resampling",
+      "description": "Cara kursor diperbesar. Point menjaga pixel art tetap tajam; Lanczos cocok untuk gambar halus.",
+      "option": {
+        "lanczos": "Lanczos (halus)",
+        "point": "Point (pixel art)",
+        "mitchell": "Mitchell (seimbang)"
+      }
+    }
+  }
 }

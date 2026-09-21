@@ -29,7 +29,9 @@ binaries**, and the tool must still work from a keybind with the shell stopped.
 - `bin/curmgr.py` — the engine. All filesystem and config writes live here.
 - `panel.luau` / `shortcut.luau` — UI only. Shells out to curmgr, renders JSON.
 - `plugin.toml` — Noctalia manifest (panel, control-centre tile, settings keys).
-- `translations/{en,id}.json` — every UI string, flat keys.
+- `translations/{en,id}.json` — every UI string. Single-segment keys are flat;
+  anything dotted (the `settings.*` keys `plugin.toml` references) is **nested
+  objects**, because the plugin store rejects a dot inside a JSON key.
 
 ### The engine contract
 
@@ -46,8 +48,10 @@ imports local; a top-level import would break the common path.
 ### Applying: five layers, one name
 
 `apply_theme()` fans one theme+size out to niri, gsettings, GTK 3/4 ini,
-`~/.icons/default/index.theme` and `environment.d`. Only `layers["niri"]["ok"]`
-gates the overall `ok` — the rest are best-effort and report their own reason.
+`~/.icons/default/index.theme` and `environment.d`. `layers["niri"]["ok"]` gates
+the overall `ok` **only where a niri config exists** — off niri that layer can
+never succeed, so the four portable layers decide instead. The rest are
+best-effort and report their own reason.
 `read_current()` reads the same five back and sets `consistent`, which is the
 drift warning the panel shows; that disagreement is the bug this plugin exists to
 fix.
@@ -93,7 +97,13 @@ survives a close, which is why `loadThemes()` clears `current` first.
 
 User-visible strings go through `noctalia.tr(key)` — add new keys to **both**
 `translations/en.json` and `translations/id.json`, including `settings.*.label` /
-`.description` keys for anything added to `plugin.toml`.
+`.description` keys for anything added to `plugin.toml`. Those dotted manifest
+keys stay dotted in `plugin.toml` and nested in the JSON.
+
+`engine()` runs `bin/curmgr.py` out of `noctalia.pluginDir()`, so nothing has to
+be on `PATH`; the `engine_path` setting is only an override. `icon` and
+`ui.glyph` names must exist in Noctalia's Tabler set — an invalid one fails
+silently apart from a `missing glyph:` line in the log.
 
 Paths from the user are always `noctalia.expandPath()`-ed then `shellQuote()`-d
 before reaching the command string.

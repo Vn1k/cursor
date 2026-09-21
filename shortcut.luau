@@ -3,11 +3,11 @@
 
 local function render()
   shortcut.setLabel(noctalia.tr("title"))
-  shortcut.setIcon("cursor")
+  shortcut.setIcon("pointer")
 end
 
 render()
 
 function onClick()
-  noctalia.togglePanel("vinik/cursor:manager")
+  noctalia.togglePanel("vn1k/cursor:manager")
 end

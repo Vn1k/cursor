@@ -6,7 +6,7 @@
 -- binary parsing and five-layer config writing out of a sandboxed script, and
 -- means the same engine works from a keybind without the shell running.
 
-local PANEL_ID = "vinik/cursor:manager"
+local PANEL_ID = "vn1k/cursor:manager"
 local SIZES = { 16, 20, 24, 28, 32, 40, 48, 64 }
 local COLUMNS = 2
 local PANEL_WIDTH = 780
@@ -63,10 +63,16 @@ local function configString(key, fallback)
   return fallback
 end
 
+-- The engine ships inside the plugin, so a store install needs nothing on
+-- PATH; the setting only exists for a checkout that keeps curmgr elsewhere.
 local function engine()
   local override = configString("engine_path", "")
   if override ~= "" then
     return shellQuote(noctalia.expandPath(override))
+  end
+  local dir = noctalia.pluginDir()
+  if type(dir) == "string" and dir ~= "" then
+    return `python3 -B {shellQuote(dir .. "/bin/curmgr.py")}`
   end
   return "curmgr"
 end
@@ -79,6 +85,10 @@ end
 -- Every subcommand answers with one JSON object, so a decode failure means the
 -- engine itself is missing or broken rather than the request being invalid.
 local function call(args, done)
+  if configString("engine_path", "") == "" and not noctalia.commandExists("python3") then
+    done(nil, tr("engine_missing"))
+    return
+  end
   noctalia.runAsync(`{engine()} {args}`, function(result)
     if result == nil or result.timedOut then
       done(nil, tr("engine_missing"))
