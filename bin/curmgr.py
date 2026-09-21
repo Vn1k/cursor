@@ -514,6 +514,97 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
 
 
 # --------------------------------------------------------------------------
+# install an already-built Xcursor theme
+# --------------------------------------------------------------------------
+
+def _is_theme_root(path: Path) -> bool:
+    """Same test list_themes() uses, so installing implies showing up in the list."""
+    cursors = path / "cursors"
+    if not cursors.is_dir():
+        return False
+    return any(f.is_file() or f.is_symlink() for f in cursors.iterdir())
+
+
+def _find_theme_roots(root: Path, max_depth: int = 3) -> list[Path]:
+    # Bounded walk: pointing this at ~/Downloads should not scan the whole disk.
+    found, stack = [], [(root, 0)]
+    while stack:
+        current, depth = stack.pop()
+        if _is_theme_root(current):
+            found.append(current)
+            continue  # a theme's own subdirs are never separate themes
+        if depth >= max_depth:
+            continue
+        try:
+            stack.extend((d, depth + 1) for d in current.iterdir() if d.is_dir())
+        except OSError:
+            continue
+    return sorted(found)
+
+
+def _theme_dir_name(root: Path) -> str:
+    """Prefer the theme's declared Name; a directory name is the fallback."""
+    declared = _index_field(root / "index.theme", "Name")
+    name = re.sub(r"\s+", "-", declared.strip()) if declared.strip() else root.name
+    return name
+
+
+def _safe_theme_name(name: str) -> str:
+    name = name.strip().strip("/")
+    if not name or name in {".", ".."} or "/" in name or "\\" in name or ".." in name:
+        raise Fail(f"refusing an unsafe theme name: {name!r}")
+    return name
+
+
+def install_theme(source: Path, name: str = "") -> dict:
+    """Copy a finished Xcursor theme into ~/.local/share/icons."""
+    if source.is_file() and source.suffix.lower() in {".cur", ".ani"}:
+        raise Fail("that is a single Windows cursor, not a theme - use import-win")
+    if not source.exists():
+        raise Fail(f"no such path: {source}")
+
+    root, tmp = _source_dir(source)
+    try:
+        # Pointing straight at a theme's cursors/ directory means the parent.
+        if root.name == "cursors" and _is_theme_root(root.parent):
+            roots = [root.parent]
+        else:
+            roots = _find_theme_roots(root)
+
+        if not roots:
+            if any(p.suffix.lower() in {".cur", ".ani"} for p in root.rglob("*")):
+                raise Fail("this looks like a Windows cursor pack - use import-win instead")
+            raise Fail(f"no Xcursor theme found under {source}: nothing has a cursors/ directory")
+        if name and len(roots) > 1:
+            raise Fail(f"--name needs exactly one theme, but {len(roots)} were found")
+
+        installed, replaced = [], []
+        for theme_root in roots:
+            dest_name = _safe_theme_name(name or _theme_dir_name(theme_root))
+            dest = USER_ICONS / dest_name
+            # Belt and braces: the name is sanitised above, this catches symlink
+            # games in USER_ICONS itself before anything is deleted.
+            USER_ICONS.mkdir(parents=True, exist_ok=True)
+            if not _is_under(dest.parent / dest.name, USER_ICONS):
+                raise Fail(f"refusing to write outside {USER_ICONS}: {dest}")
+            if dest.exists() or dest.is_symlink():
+                if not _is_under(dest, USER_ICONS):
+                    raise Fail(f"refusing to replace a theme outside {USER_ICONS}: {dest}")
+                shutil.rmtree(dest) if dest.is_dir() and not dest.is_symlink() else dest.unlink()
+                replaced.append(dest_name)
+            # symlinks=True is load-bearing: a real theme is roughly half alias
+            # symlinks, and dereferencing them bloats it and loses the aliasing.
+            shutil.copytree(theme_root, dest, symlinks=True)
+            installed.append(dest_name)
+
+        return {"ok": True, "installed": installed, "replaced": replaced,
+                "path": str(USER_ICONS)}
+    finally:
+        if tmp is not None:
+            tmp.cleanup()
+
+
+# --------------------------------------------------------------------------
 # build from PNG
 # --------------------------------------------------------------------------
 
@@ -696,6 +787,10 @@ def main(argv=None) -> int:
     p.add_argument("--name", default="")
     _add_image_args(p)
 
+    p = sub.add_parser("install", help="install a finished Xcursor theme (folder or archive)")
+    p.add_argument("source", type=Path, help="folder or archive holding a cursors/ directory")
+    p.add_argument("--name", default="", help="install under this name instead of the theme's own")
+
     p = sub.add_parser("remove", help="delete a theme you built (never a system one)")
     p.add_argument("theme")
 
@@ -719,6 +814,8 @@ def main(argv=None) -> int:
             result = build_from_pngs(
                 args.source, args.name,
                 tuple(int(s) for s in args.sizes.split(",")), args.filter_name)
+        elif args.cmd == "install":
+            result = install_theme(args.source, args.name)
         elif args.cmd == "remove":
             root = find_theme(args.theme)
             if not _is_under(root, USER_ICONS):

@@ -65,6 +65,14 @@ produce `{role: frames}` and hand it to the single sink `write_theme()`, which
 resizes, writes the canonical cursor and symlinks its aliases. Add a new source
 format by producing that dict, not by writing cursor files.
 
+`install_theme()` is deliberately **not** part of that pipeline: a finished
+Xcursor theme is copied verbatim, never re-encoded. Its `copytree(...,
+symlinks=True)` is load-bearing — roughly half of a real theme's `cursors/`
+entries are alias symlinks, and dereferencing them bloats the theme and loses
+the aliasing. `_find_theme_roots()` decides what counts as a theme using the
+same test as `list_themes()`, so "installed" always implies "appears in the
+list".
+
 - Roles are win2xcur's names. `write_theme()` **silently skips any role absent
   from `XCURSOR_ALIASES`** — a role that never appears in the output is usually
   that, not a mapping bug.
@@ -89,6 +97,18 @@ User-visible strings go through `noctalia.tr(key)` — add new keys to **both**
 
 Paths from the user are always `noctalia.expandPath()`-ed then `shellQuote()`-d
 before reaching the command string.
+
+The **Browse buttons do not use a `runAsync` callback**, for two reasons that
+are easy to rediscover the hard way: a Noctalia panel dismisses as soon as
+zenity takes focus, and `runAsync`'s `timeoutMs` is clamped to 60s, which would
+kill a dialog the user is still browsing. So `pick()` is fire-and-forget — the
+shell writes the chosen path into `pluginDataDir()/pick-{import,build}` and
+calls `noctalia msg panel-open` itself; `onOpen` consumes that stash. The `;`
+before `panel-open` (not `&&`) is what brings the panel back on Cancel.
+
+Note that `noctalia msg config-reload` reloads the Luau script but **not**
+`translations/*.json` — new keys render raw until
+`noctalia msg plugins disable/enable vinik/cursor`.
 
 ## Conventions
 

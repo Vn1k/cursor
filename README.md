@@ -34,7 +34,11 @@ start picks up the new theme.
 
 It installs the engine as `~/.local/bin/curmgr`, registers this directory as a
 local plugin source, and enables the plugin. Dependencies (`ImageMagick`,
-`python3-wand`, `win2xcur`) are installed if missing.
+`python3-wand`, `win2xcur`, `zenity`) are installed if missing.
+
+Only `zenity` is optional: it backs the panel's **Folder…** / **Archive…**
+buttons. Without it those buttons report it is missing and you type the path
+instead; everything else still works.
 
 Open it from the Noctalia control centre, or bind a key:
 
@@ -50,12 +54,32 @@ The panel is a thin wrapper; every subcommand prints one JSON object.
 curmgr list                                   # installed themes
 curmgr current                                # what each layer says right now
 curmgr apply Bibata-Modern-Ice --size 32      # write all five layers
+curmgr install ~/Downloads/Miku-Cursor        # finished Xcursor theme -> installed
 curmgr import-win ~/Downloads/pack.zip        # Windows pack -> Xcursor theme
 curmgr build ~/art/mycursor --name MyCursor   # your PNGs -> Xcursor theme
 curmgr remove MyCursor                        # only ever from ~/.local/share/icons
 ```
 
 `apply` also takes `--hide-when-typing` and `--hide-after-inactive-ms N`.
+
+### Installing a finished theme
+
+Most cursor themes you find online are already Xcursor themes — a folder with a
+`cursors/` directory inside. Point `install` at that folder, or at the `.zip`/
+`.tar.*` you downloaded, and it lands in `~/.local/share/icons`.
+
+```sh
+curmgr install ~/Downloads/Miku-Cursor.tar.gz
+```
+
+The theme's own `Name=` becomes the directory name (`Name=Miku Cursor` gives
+`Miku-Cursor`); `--name` overrides it. Archives that hold several variants get
+all of them installed. Alias symlinks are copied as symlinks, not flattened
+into duplicates — roughly half of a real theme is symlinks.
+
+A source that turns out to be a Windows pack is rejected with a pointer to
+`import-win` rather than a confusing failure, which is what happens if you aim
+this at a repo that ships both.
 
 ### Importing a Windows pack
 

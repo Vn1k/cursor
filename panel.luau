@@ -29,6 +29,12 @@ local current = nil
 local importPath, importName = "", ""
 local importShadow = false
 local buildPath, buildName = "", ""
+-- No name field: an installed theme carries its own name. `curmgr install
+-- --name` still exists for the CLI when two themes would collide.
+local installPath = ""
+-- Deleting a theme is destructive and a dialog would dismiss the panel, so the
+-- confirmation is the button itself: first click arms, second click removes.
+local pendingRemove = ""
 local report = nil
 -- ui.input only reads `value` when it mounts, so a path chosen by the picker
 -- needs a new key to land in the field at all.
@@ -111,9 +117,13 @@ end
 -- stashes the chosen path in the plugin data dir and reopens the panel itself,
 -- which also dodges the 60s ceiling runAsync puts on a callback.
 
--- Archives and single cursors; the second filter lets the user see everything.
-local FILE_FILTERS = "--file-filter='Cursor pack|*.zip *.tar *.tgz *.tar.gz"
-  .. " *.tar.xz *.tar.bz2 *.cur *.ani' --file-filter='All files|*'"
+local SEE_EVERYTHING = " --file-filter='All files|*'"
+-- Windows packs ship as archives or bare .cur/.ani; a finished Xcursor theme
+-- only ever arrives as an archive, so the two tabs filter differently.
+local PACK_FILTERS = "--file-filter='Cursor pack|*.zip *.tar *.tgz *.tar.gz"
+  .. " *.tar.xz *.tar.bz2 *.cur *.ani'" .. SEE_EVERYTHING
+local THEME_FILTERS = "--file-filter='Cursor theme|*.zip *.tar *.tgz *.tar.gz"
+  .. " *.tar.xz *.tar.bz2'" .. SEE_EVERYTHING
 
 local function stashPath(field)
   local dir = noctalia.pluginDataDir()
@@ -132,7 +142,7 @@ local function startDir(current)
   return noctalia.expandPath("~/Downloads") .. "/"
 end
 
-local function pick(field, mode, current)
+local function pick(field, mode, current, filters)
   if not noctalia.commandExists("zenity") then
     fail(tr("picker_missing"))
     return
@@ -142,7 +152,7 @@ local function pick(field, mode, current)
     fail(tr("picker_missing"))
     return
   end
-  local flags = mode == "dir" and "--directory" or FILE_FILTERS
+  local flags = mode == "dir" and "--directory" or (filters or PACK_FILTERS)
   -- `;` before panel-open, not `&&`: cancelling must still bring the panel back.
   noctalia.runAsync(
     `p=$(zenity --file-selection {flags} --title={shellQuote(tr(mode == "dir" and "pick_folder" or "pick_archive"))}`
@@ -414,6 +424,64 @@ local function buildTab()
   })
 end
 
+-- Only themes under ~/.local/share/icons are ours to delete; list_themes marks
+-- those `removable`, so system themes simply never appear here.
+local function removableRows()
+  local rows = {}
+  for _, theme in ipairs(themes) do
+    if theme.removable then
+      local name = theme.name
+      local armed = pendingRemove == name
+      table.insert(rows, ui.row({ key = `rm_{name}`, gap = 8, align = "center" }, {
+        ui.label({ text = theme.title or name, fontSize = 13, maxLines = 1, flexGrow = 1 }),
+        ui.label({ text = tostring(theme.count), fontSize = 11, color = "on_surface_variant" }),
+        ui.button({
+          key = `rmbtn_{name}`,
+          text = armed and tr("confirm_remove") or nil,
+          glyph = not armed and "trash" or nil,
+          variant = armed and "destructive" or "ghost",
+          controlSize = "sm", enabled = not busy,
+          tooltip = tr("remove"),
+          onClick = function()
+            if armed then
+              onRemoveTheme(name)
+            else
+              pendingRemove = name
+              render()
+            end
+          end,
+        }),
+      }))
+    end
+  end
+  if #rows == 0 then
+    return { ui.label({ text = tr("none_removable"), fontSize = 12,
+                        color = "on_surface_variant" }) }
+  end
+  return rows
+end
+
+local function installTab()
+  return ui.column({ flexGrow = 1, gap = 12, align = "stretch" }, {
+    ui.label({ text = tr("install_hint"), fontSize = 12, color = "on_surface_variant" }),
+    ui.input({ key = `install_path_{pickSeq}`, placeholder = tr("install_path"),
+               value = installPath, onChange = "onInstallPathChange",
+               onSubmit = "onInstallPathChange" }),
+    ui.row({ gap = 8, align = "center" }, {
+      ui.button({ key = "pick_install_dir", text = tr("pick_folder"), glyph = "folder",
+                  variant = "outline", controlSize = "sm", onClick = "onPickInstallDir" }),
+      ui.button({ key = "pick_install_file", text = tr("pick_archive"), glyph = "file-zip",
+                  variant = "outline", controlSize = "sm", onClick = "onPickInstallArchive" }),
+      ui.spacer({ flexGrow = 1 }),
+      ui.button({ key = "install", text = tr("install"), variant = "primary",
+                  onClick = "onInstall", enabled = not busy and trim(installPath) ~= "" }),
+    }),
+    ui.separator({}),
+    ui.label({ text = tr("installed_themes"), fontSize = 12, fontWeight = "bold" }),
+    ui.scroll({ flexGrow = 1, gap = 6 }, removableRows()),
+  })
+end
+
 local function tabButton(id, labelKey)
   return ui.button({
     key = `tab_{id}`, text = tr(labelKey),
@@ -431,6 +499,8 @@ render = function()
     body = importTab()
   elseif tab == "build" then
     body = buildTab()
+  elseif tab == "install" then
+    body = installTab()
   else
     body = themesTab()
   end
@@ -445,6 +515,7 @@ render = function()
     }),
     ui.row({ gap = 8, align = "center" }, {
       tabButton("themes", "tab_themes"),
+      tabButton("install", "tab_install"),
       tabButton("import", "tab_import"),
       tabButton("build", "tab_build"),
       ui.spacer({ flexGrow = 1 }),
@@ -467,6 +538,10 @@ function onOpen(_context)
     buildPath = path
     tab = "build"
   end)
+  consumePick("install", function(path)
+    installPath = path
+    tab = "install"
+  end)
   loadThemes()
 end
 
@@ -480,6 +555,69 @@ end
 
 function onPickBuildDir()
   pick("build", "dir", buildPath)
+end
+
+function onPickInstallDir()
+  pick("install", "dir", installPath, THEME_FILTERS)
+end
+
+function onPickInstallArchive()
+  pick("install", "file", installPath, THEME_FILTERS)
+end
+
+function onInstallPathChange(value)
+  installPath = trim(value)
+end
+
+function onInstall()
+  local source = trim(installPath)
+  if source == "" or busy then
+    return
+  end
+  if not noctalia.fileExists(noctalia.expandPath(source)) then
+    fail(tr("path_missing"))
+    return
+  end
+  busy = true
+  pendingRemove = ""
+  setStatus(tr("installing"))
+  render()
+
+  call(`install {shellQuote(noctalia.expandPath(source))}`, function(result, err)
+    if result == nil then
+      fail(err)
+      return
+    end
+    busy = false
+    local names = table.concat(result.installed, ", ")
+    local verb = #result.replaced > 0 and tr("replaced") or tr("installed")
+    setStatus(`{verb}: {names}`, "primary")
+    noctalia.notify(tr("title"), `{verb}: {names}`)
+    selected = result.installed[1] or selected
+    loadThemes()
+  end)
+end
+
+function onRemoveTheme(name)
+  if busy then
+    return
+  end
+  busy = true
+  pendingRemove = ""
+  setStatus(tr("removing"))
+  render()
+
+  call(`remove {shellQuote(name)}`, function(result, err)
+    if result == nil then
+      fail(err)
+      return
+    end
+    busy = false
+    setStatus(`{tr("removed")}: {name}`, "primary")
+    -- The removed theme may still be the one every layer points at; a refresh
+    -- makes the drift warning tell the truth.
+    loadThemes()
+  end)
 end
 
 function onReload()

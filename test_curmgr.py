@@ -394,6 +394,102 @@ def test_apply_rejects_unknown_theme():
         assert not (home / ".config/niri/cursor.kdl").exists()
 
 
+# ------------------------------------------------------------ 5. install e2e
+def make_theme(root, name="Demo Theme", inherits="Adwaita"):
+    """A minimal but realistic Xcursor theme: one real cursor plus alias symlinks."""
+    cursors = root / "cursors"
+    cursors.mkdir(parents=True)
+    make_cur(root / "tmp.cur")
+    # Reuse the engine's own writer so the fixture matches what a real theme holds.
+    from win2xcur.parser import open_blob
+    from win2xcur.writer import to_x11
+    frames = open_blob((root / "tmp.cur").read_bytes()).frames
+    (cursors / "left_ptr").write_bytes(to_x11(frames))
+    (root / "tmp.cur").unlink()
+    for alias in ("default", "arrow", "top_left_arrow"):
+        (cursors / alias).symlink_to("left_ptr")
+    (root / "index.theme").write_text(
+        f"[Icon Theme]\nName={name}\nInherits={inherits}\n")
+    return root
+
+
+def test_install_from_folder_keeps_symlinks():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        src = make_theme(home / "src" / "demo-cursor-linux")
+        result = run(["install", str(src)], home=home)
+        assert result["installed"] == ["Demo-Theme"], result
+        installed = home / ".local/share/icons/Demo-Theme/cursors"
+        # The whole point: aliases must stay symlinks, not become fat copies.
+        assert (installed / "default").is_symlink()
+        assert sum(1 for f in installed.iterdir() if f.is_symlink()) == 3
+        assert (installed / "left_ptr").is_file()
+        names = [t["name"] for t in run(["list"], home=home)["themes"]]
+        assert "Demo-Theme" in names, names
+
+
+def test_install_from_archive_nested():
+    import shutil
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        make_theme(home / "src" / "pack" / "Nested", name="Nested")
+        archive = shutil.make_archive(str(home / "pack"), "gztar", str(home / "src"))
+        run(["install", archive], home=home)
+        assert (home / ".local/share/icons/Nested/cursors/default").is_symlink()
+
+
+def test_install_picks_the_linux_theme_beside_a_windows_pack():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        repo = home / "src"
+        make_theme(repo / "demo-cursor-linux", name="Demo")
+        (repo / "demo-cursor-windows").mkdir(parents=True)
+        make_cur(repo / "demo-cursor-windows" / "Normal.cur")
+        result = run(["install", str(repo)], home=home)
+        assert result["installed"] == ["Demo"], result
+
+
+def test_install_rejects_a_windows_pack():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        pack = home / "src"
+        pack.mkdir(parents=True)
+        make_cur(pack / "Normal.cur")
+        result = run(["install", str(pack)], home=home, expect_ok=False)
+        assert "import-win" in result["error"], result
+
+
+def test_install_replaces_an_existing_theme():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        src = make_theme(home / "src" / "demo", name="Demo")
+        run(["install", str(src)], home=home)
+        result = run(["install", str(src)], home=home)
+        assert result["replaced"] == ["Demo"], result
+        assert len([t for t in run(["list"], home=home)["themes"]
+                    if t["name"] == "Demo"]) == 1
+
+
+def test_install_refuses_an_escaping_name():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        src = make_theme(home / "src" / "demo", name="Demo")
+        for bad in ("../escaped", "a/b", ".."):
+            run(["install", str(src), "--name", bad], home=home, expect_ok=False)
+        assert not (home / ".local/share/escaped").exists()
+        assert not (home / ".local/share/icons/escaped").exists()
+
+
+def test_install_then_remove_round_trip():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        src = make_theme(home / "src" / "demo", name="Demo")
+        run(["install", str(src)], home=home)
+        run(["remove", "Demo"], home=home)
+        names = [t["name"] for t in run(["list"], home=home)["themes"]]
+        assert "Demo" not in names, names
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

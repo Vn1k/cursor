@@ -19,6 +19,9 @@ missing=()
 python3 -c 'import wand' 2>/dev/null || missing+=(wand)
 python3 -c 'import win2xcur' 2>/dev/null || missing+=(win2xcur)
 command -v magick >/dev/null 2>&1 || command -v convert >/dev/null 2>&1 || missing+=(imagemagick)
+# Only the panel's Browse buttons need this; typing a path still works without
+# it, so a missing zenity warns rather than failing the install.
+command -v zenity >/dev/null 2>&1 || missing+=(zenity)
 
 if ((${#missing[@]})); then
   say "Missing: ${missing[*]}"
@@ -26,9 +29,10 @@ if ((${#missing[@]})); then
     pkgs=()
     [[ " ${missing[*]} " == *" imagemagick "* ]] && pkgs+=(ImageMagick)
     [[ " ${missing[*]} " == *" wand "* ]] && pkgs+=(python3-wand)
+    [[ " ${missing[*]} " == *" zenity "* ]] && pkgs+=(zenity)
     ((${#pkgs[@]})) && { say "sudo dnf install ${pkgs[*]}"; sudo dnf install -y "${pkgs[@]}"; }
   else
-    warn "No dnf here; install ImageMagick and python3-wand with your package manager."
+    warn "No dnf here; install ImageMagick, python3-wand and zenity with your package manager."
   fi
   if [[ " ${missing[*]} " == *" win2xcur "* ]]; then
     say "pip install --user win2xcur"
@@ -39,6 +43,9 @@ fi
 for mod in wand win2xcur; do
   python3 -c "import $mod" 2>/dev/null || { warn "still cannot import $mod - fix that first"; exit 1; }
 done
+
+command -v zenity >/dev/null 2>&1 \
+  || warn "zenity is missing; the panel's Browse buttons will be disabled - type paths instead."
 
 # ── engine on PATH ──────────────────────────────────────────────────────────
 mkdir -p "$BIN"
