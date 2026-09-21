@@ -49,6 +49,7 @@
   "title": "Cursor",
   "unmapped": "Not recognised",
   "unmapped_hint": "Rename those files after their role, or add an Install.inf, then convert again.",
+  "leftovers": "Files it could not place:",
   "settings": {
     "engine_path": {
       "label": "Engine path",

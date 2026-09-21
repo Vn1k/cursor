@@ -33,6 +33,9 @@ NIRI_CONFIG = NIRI_DIR / "config.kdl"
 NIRI_CURSOR = NIRI_DIR / "cursor.kdl"
 ENV_CONF = CONFIG / "environment.d" / "90-xcursor.conf"
 PREVIEW_DIR = CACHE / "curmgr" / "preview"
+# Rendered source files from the last failed import, so the panel can show the
+# user what it could not place. Cleared on every import, never accumulates.
+LEFTOVER_DIR = CACHE / "curmgr" / "leftovers"
 
 NOMINAL_SIZES = (24, 32, 48, 64, 96)
 MANAGED = "// Managed by the Noctalia cursor plugin - edits here are overwritten."
@@ -528,6 +531,7 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
                 name = name or parsed.name
                 break
 
+        claimed: set[Path] = set()
         if not role_frames:
             # Packs ship near-duplicates - "Normal Select" beside "My Melody
             # Normal Select", "Busy" beside "Busy 2" - which score the same.
@@ -543,6 +547,7 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
                     scored[role] = (key, path)
             for role, (_, path) in scored.items():
                 role_frames[role] = open_blob(path.read_bytes()).frames
+                claimed.add(path)
 
         if "arrow" not in role_frames:
             raise Fail("could not identify the basic arrow cursor; map it manually")
@@ -551,13 +556,23 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
                              shadow_opts=shadow_opts)
         mapped = set(role_frames)
         used = {p.name for p in candidates}
+        # Only roles the user could actually fill by renaming a file: location
+        # and person have no Xcursor name to be written under.
+        unmapped = [r for r in WIN_CURSORS if r not in mapped and r in XCURSOR_ALIASES]
+
+        # Show what could not be placed, but only when something was left empty.
+        # A pack that mapped everything may still have spare files - "Busy 2"
+        # beside "Busy" - and those are noise, not help. `claimed` is empty on
+        # the .inf path, which names its own files and needs no such help.
+        leftovers = []
+        if unmapped and claimed:
+            leftovers = _render_leftovers([p for p in candidates if p not in claimed])
+
         return {
             "ok": True, "name": name, "method": method, "inf_error": inf_error,
             "mapped": sorted(mapped),
-            # Only roles the user could actually fill by renaming a file:
-            # location and person have no Xcursor name to be written under.
-            "unmapped_roles": [r for r in WIN_CURSORS
-                               if r not in mapped and r in XCURSOR_ALIASES],
+            "unmapped_roles": unmapped,
+            "leftovers": leftovers,
             "source_files": sorted(used),
             **result,
         }
@@ -742,6 +757,39 @@ def _unpremultiply(single):
     return out
 
 
+def _cursor_image(path: Path, target: int = 32):
+    """First frame of a cursor file, unpremultiplied and scaled. Caller closes."""
+    from win2xcur.parser import open_blob
+
+    frame = open_blob(path.read_bytes()).frames[0]
+    best = min(frame.images, key=lambda i: abs(i.nominal - target))
+    img = _unpremultiply(best.image)
+    if img.width != target:
+        img.resize(target, max(1, round(img.height * target / img.width)), filter="lanczos")
+    return img
+
+
+def _render_leftovers(paths: list[Path], target: int = 32) -> list[dict]:
+    """Render source files no role claimed, so the user can see what to rename."""
+    if LEFTOVER_DIR.exists():
+        shutil.rmtree(LEFTOVER_DIR, ignore_errors=True)
+    LEFTOVER_DIR.mkdir(parents=True, exist_ok=True)
+
+    out = []
+    # ponytail: 12 is enough to see a pack's strays without spending a render on
+    # every file in a dump. Paginate in the panel if that ever stops being true.
+    for index, src in enumerate(paths[:12]):
+        dest = LEFTOVER_DIR / f"{index}.png"
+        try:
+            with _cursor_image(src, target) as img:
+                img.format = "png"
+                dest.write_bytes(img.make_blob())
+        except (ValueError, OSError, AssertionError, IndexError):
+            continue  # an unreadable stray is not worth failing the import over
+        out.append({"file": src.name, "preview": str(dest)})
+    return out
+
+
 def render_preview(theme: str, cell: int = 40, target: int = 32, force: bool = False) -> dict:
     from wand.color import Color
     from wand.image import Image
@@ -772,13 +820,10 @@ def render_preview(theme: str, cell: int = 40, target: int = 32, force: bool = F
     canvas = Image(width=cell * len(picks), height=cell, background=Color("transparent"))
     for index, path in enumerate(picks):
         try:
-            frame = open_blob(path.read_bytes()).frames[0]
-        except (ValueError, OSError, AssertionError):
+            image = _cursor_image(path, target)
+        except (ValueError, OSError, AssertionError, IndexError):
             continue
-        best = min(frame.images, key=lambda i: abs(i.nominal - target))
-        with _unpremultiply(best.image) as img:
-            if img.width != target:
-                img.resize(target, max(1, round(img.height * target / img.width)), filter="lanczos")
+        with image as img:
             canvas.composite(img, left=index * cell + (cell - img.width) // 2,
                              top=max(0, (cell - img.height) // 2))
     canvas.format = "png"

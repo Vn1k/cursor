@@ -49,6 +49,7 @@
   "title": "Kursor",
   "unmapped": "Tidak dikenali",
   "unmapped_hint": "Ganti nama file sesuai perannya, atau sertakan Install.inf, lalu konversi ulang.",
+  "leftovers": "File yang tidak bisa ditempatkan:",
   "settings": {
     "engine_path": {
       "label": "Path engine",

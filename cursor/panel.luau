@@ -389,6 +389,18 @@ local function reportView()
     table.insert(lines, ui.label({ text = tr("unmapped_hint"), fontSize = 11,
                                    color = "on_surface_variant" }))
   end
+  -- The engine renders whatever it could not place, so renaming is something
+  -- the user can see rather than guess. Only present when a role went empty.
+  if report.leftovers ~= nil and #report.leftovers > 0 then
+    table.insert(lines, ui.label({ text = tr("leftovers"), fontSize = 12,
+                                   color = "on_surface_variant" }))
+    for _, item in ipairs(report.leftovers) do
+      table.insert(lines, ui.row({ key = `left_{item.file}`, gap = 8, align = "center" }, {
+        ui.image({ path = item.preview, width = 32, height = 32, fit = "contain" }),
+        ui.label({ text = item.file, fontSize = 12, maxLines = 1, flexGrow = 1 }),
+      }))
+    end
+  end
   if #lines == 0 then
     return ui.box({ height = 0 })
   end

@@ -238,6 +238,8 @@ def test_import_maps_real_windows_scheme_names():
                       "--sizes", "32"], home=home)
         assert result["method"] == "heuristic", result["method"]
         assert result["unmapped_roles"] == [], result["unmapped_roles"]
+        # Nothing went unplaced, so spare files stay quiet rather than noisy.
+        assert result["leftovers"] == [], result["leftovers"]
 
         from win2xcur.parser import open_blob
         cursors = home / ".local/share/icons/SchemeTest/cursors"
@@ -299,6 +301,31 @@ def test_a_file_named_after_its_role_wins():
         # failure is silent: both roles end up on one file.
         cursors = home / ".local/share/icons/ByRole/cursors"
         assert (cursors / "default").resolve() != (cursors / "up-arrow").resolve()
+
+
+def test_unplaceable_files_come_back_rendered():
+    """When a role goes empty the panel shows what was left over, so renaming
+    is something the user can see instead of guess."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        pack = home / "pack"
+        pack.mkdir(parents=True)
+        for stem in ("normal", "help", "busy", "text", "precision", "move",
+                     "vert", "horz", "dgn1", "dgn2", "link", "alt"):
+            make_cur(pack / f"{stem}.cur", size=32, hotspot=(1, 1))
+        # Nothing can place this, and it is the file `unavailable` needed.
+        make_cur(pack / "zzz mystery.cur", size=32, hotspot=(9, 9))
+
+        result = run(["import-win", str(pack), "--name", "LeftoverTest",
+                      "--sizes", "32"], home=home)
+        assert "unavailable" in result["unmapped_roles"], result["unmapped_roles"]
+
+        assert len(result["leftovers"]) == 1, result["leftovers"]
+        left = result["leftovers"][0]
+        assert left["file"] == "zzz mystery.cur", left
+        png = Path(left["preview"])
+        assert png.is_file(), png
+        assert png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
 
 
 def test_import_windows_inf_pack():
