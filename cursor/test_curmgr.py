@@ -491,6 +491,24 @@ def test_install_refuses_an_escaping_name():
         assert not (home / ".local/share/icons/escaped").exists()
 
 
+def test_build_refuses_an_escaping_name():
+    """The theme name reaches write_theme() from spec.json or a pack's Install.inf,
+    so it is attacker-controlled on any downloaded source."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        src = home / "src"
+        src.mkdir(parents=True)
+        make_png(src / "arrow.png")
+        for bad in ("../escaped", "../../escaped", "a/b"):
+            (src / "spec.json").write_text(json.dumps({
+                "name": bad, "cursors": {"arrow": {"png": "arrow.png"}},
+            }))
+            run(["build", str(src), "--sizes", "24"], home=home, expect_ok=False)
+        assert not (home / ".local/share/escaped").exists()
+        assert not (home / ".local/escaped").exists()
+        assert not (home / ".local/share/icons/a").exists()
+
+
 def test_install_then_remove_round_trip():
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)

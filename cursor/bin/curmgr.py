@@ -394,7 +394,17 @@ def write_theme(name: str, role_frames: dict, inherits: str = "Adwaita",
     if not role_frames:
         raise Fail("nothing to build: no cursors were mapped")
 
+    # The name is not the user's: import-win takes it from a pack's Install.inf
+    # and build from spec.json, so a downloaded source names this directory.
+    # install_theme() already vets names; this is the sink both builders share,
+    # so checking here covers any future source format too.
+    name = _safe_theme_name(name)
     root = USER_ICONS / name
+    USER_ICONS.mkdir(parents=True, exist_ok=True)
+    # Belt and braces, as in install_theme: catches a symlink planted in
+    # USER_ICONS itself, which a name check cannot see.
+    if not _is_under(root, USER_ICONS):
+        raise Fail(f"refusing to write outside {USER_ICONS}: {root}")
     cursors = root / "cursors"
     cursors.mkdir(parents=True, exist_ok=True)
 
@@ -451,7 +461,16 @@ def _source_dir(path: Path) -> tuple[Path, tempfile.TemporaryDirectory | None]:
         return path, None
     if path.suffix.lower() in {".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz"}:
         tmp = tempfile.TemporaryDirectory(prefix="curmgr-")
-        shutil.unpack_archive(str(path), tmp.name)
+        # A tar entry named ../.. escapes the extraction directory unless the
+        # 'data' filter is on: 3.14 defaults to it, 3.12 and 3.13 need asking.
+        # zipfile sanitises member paths itself and rejects the keyword, so this
+        # is tar-only.
+        # ponytail: 3.11 has no filter argument at all and stays trusting. Drop
+        # the version check once 3.11 is not worth supporting.
+        extra = {}
+        if path.suffix.lower() != ".zip" and sys.version_info >= (3, 12):
+            extra["filter"] = "data"
+        shutil.unpack_archive(str(path), tmp.name, **extra)
         return Path(tmp.name), tmp
     if path.suffix.lower() in {".cur", ".ani"}:
         return path.parent, None

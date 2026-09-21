@@ -7,7 +7,7 @@
 -- means the same engine works from a keybind without the shell running.
 
 local PANEL_ID = "vn1k/cursor:manager"
-local SIZES = { 16, 20, 24, 28, 32, 40, 48, 64 }
+local SIZES = { 16, 20, 24, 28, 32, 40, 48, 64, 96, 128 }
 local COLUMNS = 2
 local PANEL_WIDTH = 780
 local PANEL_PADDING = 28 -- Style::panelPadding * 2 on the host surface
@@ -184,6 +184,16 @@ local function sizeValue()
 end
 
 local function selectSize(value)
+  for index, size in ipairs(SIZES) do
+    if size == value then
+      sizeIndex = index - 1
+      return
+    end
+  end
+  -- A size set outside this panel would otherwise leave the previous choice
+  -- showing, and Apply would silently change it. Adopt it instead.
+  table.insert(SIZES, value)
+  table.sort(SIZES)
   for index, size in ipairs(SIZES) do
     if size == value then
       sizeIndex = index - 1
