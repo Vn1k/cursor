@@ -44,9 +44,13 @@ The panel does not need that symlink: it runs `bin/curmgr.py` out of the plugin
 directory, so `python3` is the only hard requirement. Everything else is needed
 only for importing and building, and is imported lazily.
 
-Only `zenity` is optional: it backs the panel's **Folder…** / **Archive…**
-buttons. Without it those buttons report it is missing and you type the path
-instead; everything else still works.
+Only `zenity` is optional: it backs each tab's **Folder…** button. Without it
+that button reports it is missing and you type the path instead; everything else
+still works.
+
+Every tab in the panel takes a folder, so extract an archive first. The engine
+itself still accepts a `.zip` or `.tar.*` — from the CLI, or typed into the
+field — it just is not what the button offers.
 
 Open it from the Noctalia control centre, or bind a key:
 

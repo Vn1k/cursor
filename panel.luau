@@ -127,14 +127,6 @@ end
 -- stashes the chosen path in the plugin data dir and reopens the panel itself,
 -- which also dodges the 60s ceiling runAsync puts on a callback.
 
-local SEE_EVERYTHING = " --file-filter='All files|*'"
--- Windows packs ship as archives or bare .cur/.ani; a finished Xcursor theme
--- only ever arrives as an archive, so the two tabs filter differently.
-local PACK_FILTERS = "--file-filter='Cursor pack|*.zip *.tar *.tgz *.tar.gz"
-  .. " *.tar.xz *.tar.bz2 *.cur *.ani'" .. SEE_EVERYTHING
-local THEME_FILTERS = "--file-filter='Cursor theme|*.zip *.tar *.tgz *.tar.gz"
-  .. " *.tar.xz *.tar.bz2'" .. SEE_EVERYTHING
-
 local function stashPath(field)
   local dir = noctalia.pluginDataDir()
   if dir == nil then
@@ -152,7 +144,9 @@ local function startDir(current)
   return noctalia.expandPath("~/Downloads") .. "/"
 end
 
-local function pick(field, mode, current, filters)
+-- Every tab takes a folder: extract an archive first. The engine still accepts
+-- one, so a .zip or .tar.* path typed into the field keeps working.
+local function pick(field, current)
   if not noctalia.commandExists("zenity") then
     fail(tr("picker_missing"))
     return
@@ -162,10 +156,9 @@ local function pick(field, mode, current, filters)
     fail(tr("picker_missing"))
     return
   end
-  local flags = mode == "dir" and "--directory" or (filters or PACK_FILTERS)
   -- `;` before panel-open, not `&&`: cancelling must still bring the panel back.
   noctalia.runAsync(
-    `p=$(zenity --file-selection {flags} --title={shellQuote(tr(mode == "dir" and "pick_folder" or "pick_archive"))}`
+    `p=$(zenity --file-selection --directory --title={shellQuote(tr("pick_folder"))}`
       .. ` --filename={shellQuote(startDir(current))}) && printf '%s' "$p" > {shellQuote(stash)}`
       .. `; noctalia msg panel-open {shellQuote(PANEL_ID)}`
   )
@@ -395,8 +388,6 @@ local function importTab()
     ui.row({ gap = 8, align = "center" }, {
       ui.button({ key = "pick_import_dir", text = tr("pick_folder"), glyph = "folder",
                   variant = "outline", controlSize = "sm", onClick = "onPickImportDir" }),
-      ui.button({ key = "pick_import_file", text = tr("pick_archive"), glyph = "file",
-                  variant = "outline", controlSize = "sm", onClick = "onPickImportArchive" }),
       ui.spacer({ flexGrow = 1 }),
     }),
     ui.input({ key = "import_name", placeholder = tr("theme_name"), value = importName,
@@ -480,8 +471,6 @@ local function installTab()
     ui.row({ gap = 8, align = "center" }, {
       ui.button({ key = "pick_install_dir", text = tr("pick_folder"), glyph = "folder",
                   variant = "outline", controlSize = "sm", onClick = "onPickInstallDir" }),
-      ui.button({ key = "pick_install_file", text = tr("pick_archive"), glyph = "file-zip",
-                  variant = "outline", controlSize = "sm", onClick = "onPickInstallArchive" }),
       ui.spacer({ flexGrow = 1 }),
       ui.button({ key = "install", text = tr("install"), variant = "primary",
                   onClick = "onInstall", enabled = not busy and trim(installPath) ~= "" }),
@@ -556,23 +545,15 @@ function onOpen(_context)
 end
 
 function onPickImportDir()
-  pick("import", "dir", importPath)
-end
-
-function onPickImportArchive()
-  pick("import", "file", importPath)
+  pick("import", importPath)
 end
 
 function onPickBuildDir()
-  pick("build", "dir", buildPath)
+  pick("build", buildPath)
 end
 
 function onPickInstallDir()
-  pick("install", "dir", installPath, THEME_FILTERS)
-end
-
-function onPickInstallArchive()
-  pick("install", "file", installPath, THEME_FILTERS)
+  pick("install", installPath)
 end
 
 function onInstallPathChange(value)
