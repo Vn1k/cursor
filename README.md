@@ -35,7 +35,7 @@ This repo is a Noctalia plugin source, so there is nothing to clone and no
 script to run:
 
 ```sh
-noctalia msg plugins source add vn1k git https://github.com/Vn1k/noctalia-cursor
+noctalia msg plugins source add vn1k git https://github.com/Vn1k/cursor
 noctalia msg plugins enable vn1k/cursor
 ```
 

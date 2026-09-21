@@ -32,7 +32,7 @@ NIRI_DIR = CONFIG / "niri"
 NIRI_CONFIG = NIRI_DIR / "config.kdl"
 NIRI_CURSOR = NIRI_DIR / "cursor.kdl"
 ENV_CONF = CONFIG / "environment.d" / "90-xcursor.conf"
-PREVIEW_DIR = CACHE / "noctalia-cursor" / "preview"
+PREVIEW_DIR = CACHE / "curmgr" / "preview"
 
 NOMINAL_SIZES = (24, 32, 48, 64, 96)
 MANAGED = "// Managed by the Noctalia cursor plugin - edits here are overwritten."
