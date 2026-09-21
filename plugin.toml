@@ -1,0 +1,65 @@
+id = "vinik/cursor"
+name = "Cursor"
+version = "0.1.0"
+plugin_api = 22
+author = "vinik"
+license = "MIT"
+icon = "cursor"
+description = "Pick, import and build cursor themes, then apply them everywhere at once."
+tags = ["appearance", "cursor", "theme", "utility"]
+
+# curmgr owns every cursor file and every config write. This plugin runs it and
+# draws the JSON it prints, so nothing here needs to know a binary format.
+dependencies = ["curmgr"]
+
+# Only needed when curmgr is not on PATH, e.g. a checkout that was never
+# installed with setup.sh.
+[[setting]]
+key = "engine_path"
+type = "string"
+label_key = "settings.engine_path.label"
+description_key = "settings.engine_path.description"
+default = ""
+
+# Nominal sizes baked into every theme this plugin builds. Bigger sets cost
+# build time and disk; HiDPI panels want the larger entries.
+[[setting]]
+key = "build_sizes"
+type = "select"
+label_key = "settings.build_sizes.label"
+description_key = "settings.build_sizes.description"
+default = "24,32,48,64,96"
+options = [
+  { value = "24,32,48", label_key = "settings.build_sizes.option.small" },
+  { value = "24,32,48,64,96", label_key = "settings.build_sizes.option.standard" },
+  { value = "24,32,48,64,96,128", label_key = "settings.build_sizes.option.hidpi" },
+]
+
+# Windows cursors are usually 32x32 art. 'point' keeps hard pixel edges crisp
+# when they are blown up; 'lanczos' suits anti-aliased modern packs.
+[[setting]]
+key = "scale_filter"
+type = "select"
+label_key = "settings.scale_filter.label"
+description_key = "settings.scale_filter.description"
+default = "lanczos"
+options = [
+  { value = "lanczos", label_key = "settings.scale_filter.option.lanczos" },
+  { value = "point", label_key = "settings.scale_filter.option.point" },
+  { value = "mitchell", label_key = "settings.scale_filter.option.mitchell" },
+]
+
+[[panel]]
+id = "manager"
+entry = "panel.luau"
+width = 780
+height = 640
+placement = "attached"
+position = "auto"
+dismiss_on_outside_click = true
+
+# A cursor is set once and then forgotten, so it belongs in the control centre
+# rather than taking permanent space in the bar.
+[[shortcut]]
+id = "shortcut"
+entry = "shortcut.luau"
