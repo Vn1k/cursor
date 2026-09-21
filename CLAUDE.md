@@ -105,6 +105,10 @@ be on `PATH`; the `engine_path` setting is only an override. `icon` and
 `ui.glyph` names must exist in Noctalia's Tabler set — an invalid one fails
 silently apart from a `missing glyph:` line in the log.
 
+`ui.spacer` is a **flexible filler** with no `height` prop, so
+`ui.spacer({ height = 0 })` is not "render nothing" — it silently eats the
+leftover space of its parent column. Render nothing with `ui.box({ height = 0 })`.
+
 Paths from the user are always `noctalia.expandPath()`-ed then `shellQuote()`-d
 before reaching the command string.
 

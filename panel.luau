@@ -329,7 +329,7 @@ end
 -- layer drifted, say so rather than letting the cursor silently differ per app.
 local function driftWarning()
   if current == nil or current.consistent or busy then
-    return ui.spacer({ height = 0 })
+    return ui.box({ height = 0 })
   end
   return ui.row({ gap = 8, align = "center" }, {
     ui.glyph({ name = "alert-triangle", color = "tertiary", size = 16 }),
@@ -362,7 +362,7 @@ end
 
 local function reportView()
   if report == nil then
-    return ui.spacer({ height = 0 })
+    return ui.box({ height = 0 })
   end
   local lines = {}
   if report.method ~= nil then
@@ -382,7 +382,7 @@ local function reportView()
                                    color = "on_surface_variant" }))
   end
   if #lines == 0 then
-    return ui.spacer({ height = 0 })
+    return ui.box({ height = 0 })
   end
   return ui.column({ gap = 4, align = "stretch" }, lines)
 end
