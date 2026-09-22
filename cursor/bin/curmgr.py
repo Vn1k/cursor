@@ -45,7 +45,6 @@ BUILD_ROLE_DIR = CACHE / "curmgr" / "build-roles"
 
 NOMINAL_SIZES = (24, 32, 48, 64, 96)
 MANAGED_TEXT = "Managed by the Noctalia cursor plugin - edits here are overwritten."
-MANAGED = f"// {MANAGED_TEXT}"
 
 # Slots shown in the preview strip, each with fallbacks across naming eras.
 PREVIEW_SLOTS = [
@@ -173,13 +172,12 @@ def read_current() -> dict:
     env = ENV_CONF.read_text(errors="replace") if ENV_CONF.is_file() else ""
     env_theme = re.search(r"^XCURSOR_THEME=(.*)$", env, re.M)
 
-    layers = {}
-    first = None
-    for key, spec in detected_compositors().items():
-        state = _read_compositor(spec)
-        layers[key] = state["theme"]
-        if first is None:
-            first = state
+    # On a box with several compositor configs the panel shows the first row's
+    # state, in COMPOSITORS declaration order; they only disagree if one was
+    # hand-edited.
+    states = {key: _read_compositor(spec) for key, spec in detected_compositors().items()}
+    first = next(iter(states.values()), {})
+    layers = {key: state["theme"] for key, state in states.items()}
     layers |= {
         "gsettings": _gsettings("cursor-theme"),
         "gtk3": _ini_value(CONFIG / "gtk-3.0" / "settings.ini", "gtk-cursor-theme-name"),
@@ -190,11 +188,10 @@ def read_current() -> dict:
     present = [v for v in layers.values() if v]
     return {
         "ok": True,
-        "theme": (first["theme"] if first else "") or layers["gsettings"],
-        "size": (first["size"] if first and first["size"] else 0)
-                or int(_gsettings("cursor-size") or 24),
-        "hide_when_typing": bool(first and first["hide_when_typing"]),
-        "hide_after_inactive_ms": first["hide_after_inactive_ms"] if first else 0,
+        "theme": first.get("theme") or layers["gsettings"],
+        "size": first.get("size") or int(_gsettings("cursor-size") or 24),
+        "hide_when_typing": bool(first.get("hide_when_typing")),
+        "hide_after_inactive_ms": first.get("hide_after_inactive_ms", 0),
         "layers": layers,
         # Layers that disagree are the exact bug this tool exists to fix.
         "consistent": len(set(present)) <= 1 and len(present) == len(layers),
@@ -209,8 +206,8 @@ def read_current() -> dict:
 # applying
 # --------------------------------------------------------------------------
 
-def _render_niri(theme: str, size: int, hide_typing: bool, hide_ms: int, text: str) -> str:
-    lines = [MANAGED, "cursor {", f'    xcursor-theme "{theme}"', f"    xcursor-size {size}"]
+def _render_niri(theme: str, size: int, hide_typing: bool, hide_ms: int, config_text: str) -> str:
+    lines = ["cursor {", f'    xcursor-theme "{theme}"', f"    xcursor-size {size}"]
     if hide_typing:
         lines.append("    hide-when-typing")
     if hide_ms > 0:
@@ -218,20 +215,19 @@ def _render_niri(theme: str, size: int, hide_typing: bool, hide_ms: int, text: s
     lines.append("}")
     # niri allows only one top-level `environment` node, so leave XCURSOR_* to
     # environment.d when the user already owns that block.
-    if not re.search(r"^environment\s*\{", text, re.M):
+    if not re.search(r"^environment\s*\{", config_text, re.M):
         lines += ["environment {", f'    XCURSOR_THEME "{theme}"',
                   f'    XCURSOR_SIZE "{size}"', "}"]
     return "\n".join(lines) + "\n"
 
 
-def _render_hyprland(theme: str, size: int, hide_typing: bool, hide_ms: int, text: str) -> str:
+def _render_hyprland(theme: str, size: int, hide_typing: bool, hide_ms: int, config_text: str) -> str:
     # Hyprland has no cursor-theme option: the theme travels as XCURSOR_* env,
     # and `hyprctl setcursor` (see the reload argv) is what moves the pointer
     # now rather than at next login. Both hide keys are always written, because
     # the parser is last-wins and an omitted key would leave an earlier one of
     # the user's standing when the panel turns the toggle off.
     return "\n".join([
-        f"# {MANAGED_TEXT}",
         f"env = XCURSOR_THEME,{theme}",
         f"env = XCURSOR_SIZE,{size}",
         "cursor {",
@@ -242,21 +238,19 @@ def _render_hyprland(theme: str, size: int, hide_typing: bool, hide_ms: int, tex
     ]) + "\n"
 
 
-def _render_sway(theme: str, size: int, hide_typing: bool, hide_ms: int, text: str) -> str:
+def _render_sway(theme: str, size: int, hide_typing: bool, hide_ms: int, config_text: str) -> str:
     # sway's hide_cursor takes milliseconds like niri, but rejects anything
     # between 1 and 99; 0 is the documented "never hide".
     idle = 0 if hide_ms <= 0 else max(100, hide_ms)
     return "\n".join([
-        f"# {MANAGED_TEXT}",
         f"seat * xcursor_theme {theme} {size}",
         f"seat * hide_cursor when-typing {'enable' if hide_typing else 'disable'}",
         f"seat * hide_cursor {idle}",
     ]) + "\n"
 
 
-def _render_mango(theme: str, size: int, hide_typing: bool, hide_ms: int, text: str) -> str:
+def _render_mango(theme: str, size: int, hide_typing: bool, hide_ms: int, config_text: str) -> str:
     return "\n".join([
-        f"# {MANAGED_TEXT}",
         f"cursor_theme={theme}",
         f"cursor_size={size}",
         f"cursor_hide_on_keypress={1 if hide_typing else 0}",
@@ -289,7 +283,7 @@ COMPOSITORS = {
     "hyprland": {
         "config": CONFIG / "hypr" / "hyprland.conf",
         "include_file": CONFIG / "hypr" / "cursor.conf",
-        "include_line": f"source = {CONFIG / 'hypr' / 'cursor.conf'}",
+        "include_line": "source = {file}",
         "comment": "#",
         "render": _render_hyprland,
         # ponytail: no validation. `Hyprland --verify-config` builds a whole
@@ -308,7 +302,7 @@ COMPOSITORS = {
     "sway": {
         "config": CONFIG / "sway" / "config",
         "include_file": CONFIG / "sway" / "cursor.conf",
-        "include_line": f"include {CONFIG / 'sway' / 'cursor.conf'}",
+        "include_line": "include {file}",
         "comment": "#",
         "render": _render_sway,
         "validate": ["sway", "-C", "-c"],
@@ -322,7 +316,7 @@ COMPOSITORS = {
     "mango": {
         "config": CONFIG / "mango" / "config.conf",
         "include_file": CONFIG / "mango" / "cursor.conf",
-        "include_line": f"source={CONFIG / 'mango' / 'cursor.conf'}",
+        "include_line": "source={file}",
         "comment": "#",
         "render": _render_mango,
         # ponytail: `mango -c FILE -p` is documented as a parse check but would
@@ -371,8 +365,8 @@ def _read_compositor(spec: dict) -> dict:
 def _apply_compositor(name: str, spec: dict, theme: str, size: int,
                       hide_typing: bool, hide_ms: int) -> dict:
     config, include_file = spec["config"], spec["include_file"]
-    if not config.is_file():
-        return {"ok": False, "reason": f"no {name} config at {config}"}
+    comment = spec["comment"]
+    include_line = spec["include_line"].format(file=include_file)
 
     text = config.read_text()
     backup = None
@@ -381,16 +375,17 @@ def _apply_compositor(name: str, spec: dict, theme: str, size: int,
     block = spec.get("comment_block")
     if block and re.search(rf"^{block}\s*\{{", text, re.M):
         backup = _backup(config)
-        text = _comment_out_block(text, block)
+        text = _comment_out_block(text, block, comment)
         notes.append(f"commented out the pre-existing top-level {block} block")
 
-    include_file.write_text(spec["render"](theme, size, hide_typing, hide_ms, text))
+    include_file.write_text(f"{comment} {MANAGED_TEXT}\n"
+                            + spec["render"](theme, size, hide_typing, hide_ms, text))
 
-    if not re.search(rf"^\s*{re.escape(spec['include_line'])}\s*$", text, re.M):
+    if not re.search(rf"^\s*{re.escape(include_line)}\s*$", text, re.M):
         if backup is None:
             backup = _backup(config)
-        text = text.rstrip("\n") + f"\n\n{spec['comment']} {MANAGED_TEXT}\n{spec['include_line']}\n"
-        notes.append(f"added {spec['include_line']}")
+        text = text.rstrip("\n") + f"\n\n{comment} {MANAGED_TEXT}\n{include_line}\n"
+        notes.append(f"added {include_line}")
 
     if text != config.read_text():
         config.write_text(text)
@@ -427,8 +422,8 @@ def _reload(spec: dict, theme: str, size: int) -> list[str]:
     return notes
 
 
-def _comment_out_block(text: str, node: str) -> str:
-    """Prefix `//` to a top-level KDL block, tracking brace depth."""
+def _comment_out_block(text: str, node: str, comment: str = "//") -> str:
+    """Comment out a top-level brace block, tracking brace depth."""
     lines = text.splitlines()
     out, depth, active = [], 0, False
     for line in lines:
@@ -436,7 +431,7 @@ def _comment_out_block(text: str, node: str) -> str:
             active = True
         if active:
             depth += line.count("{") - line.count("}")
-            out.append("// " + line)
+            out.append(f"{comment} " + line)
             if depth <= 0:
                 active = False
                 depth = 0
@@ -499,7 +494,7 @@ def _apply_xdg_default(theme: str) -> dict:
 
 def _apply_environment(theme: str, size: int) -> dict:
     ENV_CONF.parent.mkdir(parents=True, exist_ok=True)
-    ENV_CONF.write_text(f"# {MANAGED[3:]}\nXCURSOR_THEME={theme}\nXCURSOR_SIZE={size}\n")
+    ENV_CONF.write_text(f"# {MANAGED_TEXT}\nXCURSOR_THEME={theme}\nXCURSOR_SIZE={size}\n")
     return {"ok": True, "file": str(ENV_CONF), "note": "applies to processes started after next login"}
 
 

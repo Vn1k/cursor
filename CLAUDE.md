@@ -72,9 +72,12 @@ the theme right across a compositor switch, and the reload argv are best-effort,
 so the ones that are not running do nothing.
 
 `COMPOSITORS` is the whole of it — adding a compositor is adding a row, never a
-new write path. Each row names its config, the managed include file it owns, the
-line appended to the config, a `render` function, the regexes `read_current()`
-reads back with, an optional validator and the reload argv.
+new write path. Each row names its config, the managed include file it owns, a
+template for the line appended to the config (`{file}` is that include file, so
+the path is never spelled twice), a `render` function, the regexes
+`read_current()` reads back with, an optional validator and the reload argv.
+The renderers write only the body: `_apply_compositor` prepends the managed-by
+header itself, using the row's `comment`.
 
 `_apply_compositor()` is the only thing here that edits a file it does not own.
 It backs up the config, optionally comments out a conflicting block, writes the
