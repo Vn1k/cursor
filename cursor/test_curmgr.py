@@ -703,6 +703,91 @@ def test_install_refuses_an_escaping_name():
         assert not (home / ".local/share/icons/escaped").exists()
 
 
+def _png_pack(home: Path) -> Path:
+    """The folder test_build_from_pngs uses: a spec'd arrow and an animated wait."""
+    src = home / "src"
+    src.mkdir(parents=True)
+    make_png(src / "arrow.png")
+    for n in (1, 2, 3):
+        make_png(src / f"wait_{n:02d}.png", colour="#e01b24")
+    (src / "spec.json").write_text(json.dumps({
+        "name": "MyCursor", "inherits": "Adwaita",
+        "cursors": {
+            "arrow": {"png": "arrow.png", "hotspot": [4, 2]},
+            "wait": {"png": "wait_*.png", "delay_ms": 40},
+        },
+    }))
+    return src
+
+
+def test_build_dry_run_maps_without_writing():
+    """Build scans before it writes, like import-win: the grid has to come back
+    whole and the disk has to stay untouched."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        src = _png_pack(home)
+
+        result = run(["build", str(src), "--dry-run", "--sizes", "24"], home=home)
+        assert result["written"] is False, result
+        assert result["method"] == "spec.json", result["method"]
+        assert sorted(result["mapped"]) == ["arrow", "wait"], result["mapped"]
+        assert "size_nwse" in result["unmapped_roles"], result["unmapped_roles"]
+        assert len(result["files"]) == 4, result["files"]  # arrow + 3 wait frames
+        assert set(result["role_previews"]) == {"arrow", "wait"}, result["role_previews"]
+        assert not (home / ".local/share/icons/MyCursor").exists(), "a dry run wrote a theme"
+
+
+def test_build_map_assigns_a_png_to_a_role():
+    """A PNG no rule would claim, placed by hand from the grid. The spec's
+    hotspot for that role still applies - a drop picks the file, not the geometry."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        src = _png_pack(home)
+        make_png(src / "squiggle.png", colour="#33d17a")
+        spec = json.loads((src / "spec.json").read_text())
+        spec["cursors"]["size_nwse"] = {"png": "nothing-matches-this*.png", "hotspot": [3, 3]}
+        (src / "spec.json").write_text(json.dumps(spec))
+
+        # Without the override the role is reported as skipped, not built.
+        dry = run(["build", str(src), "--dry-run", "--sizes", "24"], home=home)
+        assert "size_nwse" in dry["skipped"], dry["skipped"]
+
+        # Built at the PNGs' own 32px, so _expand_sizes leaves the hotspot alone
+        # and the assertion below is about the override, not about rescaling.
+        result = run(["build", str(src), "--map", "size_nwse=squiggle.png",
+                      "--sizes", "32"], home=home)
+        assert result["written"] is True, result
+        assert "size_nwse" in result["mapped"], result["mapped"]
+        assert "size_nwse" not in result["skipped"], result["skipped"]
+
+        from win2xcur.parser import open_blob
+        cursors = home / ".local/share/icons/MyCursor/cursors"
+        nwse = open_blob((cursors / "nwse-resize").read_bytes()).frames[0]
+        assert {i.hotspot for i in nwse.images} == {(3, 3)}, "spec hotspot lost"
+
+
+def test_build_without_an_arrow_returns_a_grid():
+    """No arrow means no `default` cursor, so nothing is written - but the user
+    gets the grid to assign one from, not an error."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        src = home / "src"
+        src.mkdir(parents=True)
+        make_png(src / "text.png")
+        make_png(src / "help.png", colour="#e01b24")
+
+        result = run(["build", str(src), "--name", "NoArrow", "--sizes", "24"], home=home)
+        assert result["written"] is False, result
+        assert "arrow" not in result["mapped"], result["mapped"]
+        assert len(result["files"]) == 2, result["files"]
+        assert not (home / ".local/share/icons/NoArrow").exists(), result
+
+        result = run(["build", str(src), "--name", "NoArrow", "--map", "arrow=text.png",
+                      "--sizes", "24"], home=home)
+        assert result["written"] is True, result
+        assert (home / ".local/share/icons/NoArrow/cursors/default").exists(), result
+
+
 def test_build_refuses_an_escaping_name():
     """The theme name reaches write_theme() from spec.json or a pack's Install.inf,
     so it is attacker-controlled on any downloaded source."""

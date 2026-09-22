@@ -40,23 +40,25 @@ local pendingRemove = ""
 -- too - both tabs called the same reportView() off the same variable.
 local importReport = nil
 local buildReport = nil
--- Manual role mapping, built from the last scan or import's `files`/
--- `role_previews`. `mapping` (role -> relpath) survives a re-convert so a fix
--- sticks; the rest is redrawn from each result.
-local mapping = {}
-local mapFiles = {}
-local mapRoles = {}
-local mapPreviews = {}
--- The role tile the user clicked, waiting for a file tile to pair it with.
-local mapTarget = ""
--- The import path the grid on screen belongs to. Empty, or different from the
--- field, means nothing has been scanned yet and the button offers a scan.
-local mapScanned = ""
--- Bumped on every import. The engine rewrites the same cache paths each run
--- (import-roles/{role}.png, import-sources/{index}.png) and the host caches
--- textures by path, so a tile would keep painting the previous run's art
--- unless its image node changes key. Same trick screen-toolkit uses.
-local mapSerial = 0
+-- Manual role mapping, built from the last scan's `files`/`role_previews`.
+-- Import and Build each get their own: one shared set is what put the Windows
+-- grid under Build in the first place, and both tabs can hold a grid at once.
+--   mapping  role -> relpath, survives a re-run so a fix sticks
+--   files    every source file the engine rendered, the strip under the grid
+--   roles    grid order: mapped first, then the ones nothing claimed
+--   previews role -> what the engine says that role currently holds
+--   target   the role tile clicked, waiting for a file tile to pair it with
+--   scanned  the path this grid belongs to; different from the field means
+--            nothing has been scanned yet and the button offers a scan
+--   serial   bumped per run. The engine rewrites the same cache paths every
+--            time and the host caches textures by path, so a tile would keep
+--            painting the last run's art unless its image node changes key.
+--            Same trick screen-toolkit uses.
+local function newMapState(id)
+  return { tab = id, mapping = {}, files = {}, roles = {}, previews = {},
+           target = "", scanned = "", serial = 0 }
+end
+local maps = { import = newMapState("import"), build = newMapState("build") }
 -- ui.input only reads `value` when it mounts, so a path chosen by the picker
 -- needs a new key to land in the field at all.
 local pickSeq = 0
@@ -408,63 +410,64 @@ end
 
 -- Shared by both the click-to-arm flow and a drag-and-drop, so a file always
 -- lands the same way regardless of which gesture placed it.
-local function assign(role, rel)
-  mapping[role] = rel
-  mapTarget = ""
+local function assign(st, role, rel)
+  st.mapping[role] = rel
+  st.target = ""
   render()
 end
 
-local function mapRoleTile(role, byRel)
-  local isArmed = mapTarget == role
-  local override = mapping[role]
+local function mapRoleTile(st, role, byRel)
+  local isArmed = st.target == role
+  local override = st.mapping[role]
   local border = isArmed and "primary" or (override ~= nil and "tertiary" or "outline")
   -- An override is a pending intent: the engine only re-renders role previews
   -- on the next convert, so show the assigned file's own thumbnail meanwhile.
   -- Without this the tile keeps last convert's art (or stays empty) until the
   -- user converts again, which makes a drop look like it did nothing.
-  local preview = override ~= nil and byRel[override] or mapPreviews[role]
+  local preview = override ~= nil and byRel[override] or st.previews[role]
   local onClick = function()
-    if mapTarget == role then
+    if st.target == role then
       -- second click on an armed role clears any override, back to the guess
-      mapping[role] = nil
-      mapTarget = ""
+      st.mapping[role] = nil
+      st.target = ""
     else
-      mapTarget = role
+      st.target = role
     end
     render()
   end
   local frame
   if preview ~= nil then
-    frame = ui.image({ key = `role_img_{role}_{mapSerial}_{override or "auto"}`,
+    frame = ui.image({ key = `role_img_{st.tab}_{role}_{st.serial}_{override or "auto"}`,
                        width = MAP_TILE, height = MAP_TILE, path = preview, fit = "contain",
                        radius = 8, border = border, borderWidth = isArmed and 3 or 1, onClick = onClick })
   else
     frame = ui.box({ width = MAP_TILE, height = MAP_TILE, fill = "surface_variant",
                      radius = 8, border = border, borderWidth = isArmed and 3 or 1, onClick = onClick })
   end
-  local tile = ui.column({ key = `role_{role}`, gap = 2, align = "center", width = 60 }, {
+  local tile = ui.column({ key = `role_{st.tab}_{role}`, gap = 2, align = "center", width = 60 }, {
     frame,
     ui.label({ text = role, fontSize = 10, maxLines = 1, maxWidth = 60,
                textAlign = "center", color = "on_surface_variant" }),
   })
   -- Every role is a drop target: dragging a file tile onto it assigns it,
-  -- the same as arming the role then clicking the file.
+  -- the same as arming the role then clicking the file. The drag type carries
+  -- the tab, so the two grids can never accept each other's files.
   return ui.dropZone({
-    key = `dropzone_{role}`, accepts = { "cursor-file" }, value = role,
-    onDrop = function(payload) assign(role, payload) end,
+    key = `dropzone_{st.tab}_{role}`, accepts = { `{st.tab}-file` }, value = role,
+    onDrop = function(payload) assign(st, role, payload) end,
     direction = "column", radius = 8, hitSlop = 6,
   }, { tile })
 end
 
-local function mapFileTile(file)
+local function mapFileTile(st, file)
   local onClick = function()
-    if mapTarget == "" then
+    if st.target == "" then
       return
     end
-    assign(mapTarget, file.rel)
+    assign(st, st.target, file.rel)
   end
-  local tile = ui.column({ key = `file_{file.rel}`, gap = 2, align = "center", width = 60 }, {
-    ui.image({ key = `file_img_{file.rel}_{mapSerial}`,
+  local tile = ui.column({ key = `file_{st.tab}_{file.rel}`, gap = 2, align = "center", width = 60 }, {
+    ui.image({ key = `file_img_{st.tab}_{file.rel}_{st.serial}`,
                width = MAP_TILE, height = MAP_TILE, path = file.preview, fit = "contain",
                radius = 8, border = "outline", borderWidth = 1, onClick = onClick }),
     ui.label({ text = file.file, fontSize = 10, maxLines = 1, maxWidth = 60,
@@ -473,45 +476,45 @@ local function mapFileTile(file)
   -- Click-to-arm still works (see mapRoleTile) for anything that can't drag;
   -- this just adds dragging the tile itself onto a role as a shortcut.
   return ui.dragSource({
-    key = `dragsource_{file.rel}`, dragType = "cursor-file", payload = file.rel,
+    key = `dragsource_{st.tab}_{file.rel}`, dragType = `{st.tab}-file`, payload = file.rel,
     tooltip = file.file,
   }, { tile })
 end
 
--- Always shown after a convert, even when every role mapped: any tile can be
+-- Always shown after a scan, even when every role mapped: any tile can be
 -- reassigned, not only the empty ones. Click a role, then a file, to assign.
-local function mappingGrid()
-  if #mapRoles == 0 then
+local function mappingGrid(st)
+  if #st.roles == 0 then
     return ui.box({ height = 0 })
   end
   -- rel -> thumbnail, so a role tile can paint the file assigned to it before
   -- the engine has re-rendered anything.
   local byRel = {}
-  for _, file in ipairs(mapFiles) do
+  for _, file in ipairs(st.files) do
     byRel[file.rel] = file.preview
   end
   local roleTiles = {}
-  for _, role in ipairs(mapRoles) do
-    table.insert(roleTiles, mapRoleTile(role, byRel))
+  for _, role in ipairs(st.roles) do
+    table.insert(roleTiles, mapRoleTile(st, role, byRel))
   end
   local fileTiles = {}
-  for _, file in ipairs(mapFiles) do
-    table.insert(fileTiles, mapFileTile(file))
+  for _, file in ipairs(st.files) do
+    table.insert(fileTiles, mapFileTile(st, file))
   end
   return ui.column({ gap = 8, align = "stretch" }, {
     ui.label({ text = tr("map_roles"), fontSize = 12, color = "on_surface_variant" }),
     wrapTiles(roleTiles, MAP_COLUMNS),
     ui.label({
-      text = mapTarget ~= "" and `{tr("map_pick")} {mapTarget}` or tr("map_source_files"),
-      fontSize = 11, color = mapTarget ~= "" and "primary" or "on_surface_variant",
+      text = st.target ~= "" and `{tr("map_pick")} {st.target}` or tr("map_source_files"),
+      fontSize = 11, color = st.target ~= "" and "primary" or "on_surface_variant",
     }),
     wrapTiles(fileTiles, MAP_COLUMNS),
   })
 end
 
--- `withGrid` is import-only: a PNG build has no Windows roles to assign, so
--- Build's report never carries the mapping grid, even if one is present.
-local function reportView(rep, withGrid)
+-- `st` is the grid this report belongs to, nil for a tab that has none. Both
+-- builders return the same shape now, so one view serves Import and Build.
+local function reportView(rep, st)
   if rep == nil then
     return ui.box({ height = 0 })
   end
@@ -537,8 +540,8 @@ local function reportView(rep, withGrid)
     table.insert(lines, ui.label({ text = tr("unmapped_hint"), fontSize = 11,
                                    color = "on_surface_variant" }))
   end
-  if withGrid then
-    table.insert(lines, mappingGrid())
+  if st ~= nil then
+    table.insert(lines, mappingGrid(st))
   end
   return ui.column({ gap = 8, align = "stretch" }, lines)
 end
@@ -546,9 +549,10 @@ end
 local function importTab()
   -- Nothing scanned for the path in the field: read the pack and show the grid
   -- first, so the convert that follows is the only one that writes a theme.
-  local needsScan = mapScanned ~= trim(importPath)
+  local st = maps.import
+  local needsScan = st.scanned ~= trim(importPath)
   local label = needsScan and tr("scan")
-    or (next(mapping) ~= nil and tr("convert_again") or tr("convert"))
+    or (next(st.mapping) ~= nil and tr("convert_again") or tr("convert"))
   return ui.column({ flexGrow = 1, gap = 12, align = "stretch" }, {
     ui.label({ text = tr("import_hint"), fontSize = 12, color = "on_surface_variant" }),
     ui.input({ key = `import_path_{pickSeq}`, placeholder = tr("import_path"), value = importPath,
@@ -569,11 +573,17 @@ local function importTab()
                   onClick = needsScan and "onScanImport" or "onImport",
                   enabled = not busy and trim(importPath) ~= "" }),
     }),
-    ui.scroll({ flexGrow = 1, gap = 8 }, { reportView(importReport, true) }),
+    ui.scroll({ flexGrow = 1, gap = 8 }, { reportView(importReport, st) }),
   })
 end
 
 local function buildTab()
+  -- Same scan-then-write flow as Import: the PNGs are read and shown, and only
+  -- the second press writes a theme.
+  local st = maps.build
+  local needsScan = st.scanned ~= trim(buildPath)
+  local label = needsScan and tr("scan_build")
+    or (next(st.mapping) ~= nil and tr("build_again") or tr("build"))
   return ui.column({ flexGrow = 1, gap = 12, align = "stretch" }, {
     ui.label({ text = tr("build_hint"), fontSize = 12, color = "on_surface_variant" }),
     ui.input({ key = `build_path_{pickSeq}`, placeholder = tr("build_path"), value = buildPath,
@@ -587,10 +597,11 @@ local function buildTab()
                onChange = "onBuildNameChange", onSubmit = "onBuildNameChange" }),
     ui.row({ gap = 12, align = "center" }, {
       ui.spacer({ flexGrow = 1 }),
-      ui.button({ key = "build", text = tr("build"), variant = "primary",
-                  onClick = "onBuild", enabled = not busy and trim(buildPath) ~= "" }),
+      ui.button({ key = "build", text = label, variant = "primary",
+                  onClick = needsScan and "onScanBuild" or "onBuild",
+                  enabled = not busy and trim(buildPath) ~= "" }),
     }),
-    ui.scroll({ flexGrow = 1, gap = 8 }, { reportView(buildReport, false) }),
+    ui.scroll({ flexGrow = 1, gap = 8 }, { reportView(buildReport, st) }),
   })
 end
 
@@ -711,11 +722,14 @@ function onOpen(_context)
     tab = "install"
   end)
   loadThemes()
-  -- Picking a folder is the whole intent, so read the pack straight away: the
-  -- user gets the mapping grid without a second click, and still decides when
-  -- anything is written.
-  if trim(importPath) ~= "" and mapScanned ~= trim(importPath) then
+  -- Picking a folder is the whole intent, so read it straight away: the user
+  -- gets the mapping grid without a second click, and still decides when
+  -- anything is written. Only the tab the pick landed on scans - `busy` would
+  -- swallow the second call anyway, and a pick only ever sets one field.
+  if tab == "import" and trim(importPath) ~= "" and maps.import.scanned ~= trim(importPath) then
     onScanImport()
+  elseif tab == "build" and trim(buildPath) ~= "" and maps.build.scanned ~= trim(buildPath) then
+    onScanBuild()
   end
 end
 
@@ -841,12 +855,7 @@ end
 function onImportPathChange(value)
   importPath = trim(value)
   -- A new source invalidates every relpath the old grid was built from.
-  mapping = {}
-  mapFiles = {}
-  mapRoles = {}
-  mapPreviews = {}
-  mapTarget = ""
-  mapScanned = ""
+  maps.import = newMapState("import")
   importReport = nil
 end
 
@@ -859,11 +868,57 @@ function onToggleShadow()
   render()
 end
 
--- A scan and a convert are the same run with the same mapping, differing only
--- in whether the engine writes the theme at the end - so they share a body
--- rather than drifting apart. `doImport` is local; the two globals below are
+-- Both builders now return the same grid payload, so both tabs land it the
+-- same way. The grid stays on screen either way, which is why nothing here
+-- switches tabs; the themes list is only refreshed, not reloaded with previews.
+local function applyMapResult(st, source, result)
+  st.files = result.files or {}
+  st.previews = result.role_previews or {}
+  -- Fresh art at the same cache paths: re-key every tile image (see serial).
+  st.serial += 1
+  st.roles = {}
+  for _, role in ipairs(result.mapped or {}) do
+    table.insert(st.roles, role)
+  end
+  for _, role in ipairs(result.unmapped_roles or {}) do
+    table.insert(st.roles, role)
+  end
+  st.target = ""
+  st.scanned = source
+
+  if result.written then
+    selected = result.name
+    setStatus(`{tr("built")}: {result.name}`, "primary")
+    noctalia.notify(tr("title"), `{tr("built")}: {result.name}`)
+    call("list", function(listResult)
+      if listResult ~= nil then
+        themes = listResult.themes or {}
+        render()
+      end
+    end)
+  elseif table.find(result.mapped or {}, "arrow") == nil then
+    setStatus(tr("needs_arrow"), "tertiary")
+  else
+    setStatus(tr("map_roles"))
+  end
+  render()
+end
+
+-- Every override the grid holds, as engine flags.
+local function mapArgs(st)
+  local args = ""
+  for role, rel in pairs(st.mapping) do
+    args ..= ` --map {shellQuote(`{role}={rel}`)}`
+  end
+  return args
+end
+
+-- A scan and a write are the same run with the same mapping, differing only in
+-- whether the engine writes the theme at the end - so they share a body rather
+-- than drifting apart. `doImport`/`doBuild` are local; the globals below are
 -- what the buttons reference by name.
 local function doImport(dryRun)
+  local st = maps.import
   local source = trim(importPath)
   if source == "" or busy then
     return
@@ -875,7 +930,7 @@ local function doImport(dryRun)
   -- Typing in the path field clears the grid without a re-render, so the button
   -- can still read "Convert" for a pack nobody has scanned. Decide on the state,
   -- not on the label: an unscanned path always scans first.
-  dryRun = dryRun or mapScanned ~= source
+  dryRun = dryRun or st.scanned ~= source
   busy = true
   importReport = nil
   setStatus(dryRun and tr("scanning") or tr("converting"))
@@ -891,9 +946,7 @@ local function doImport(dryRun)
   if dryRun then
     args ..= " --dry-run"
   end
-  for role, rel in pairs(mapping) do
-    args ..= ` --map {shellQuote(`{role}={rel}`)}`
-  end
+  args ..= mapArgs(st)
 
   call(args, function(result, err)
     if result == nil then
@@ -902,38 +955,7 @@ local function doImport(dryRun)
     end
     busy = false
     importReport = result
-    mapFiles = result.files or {}
-    mapPreviews = result.role_previews or {}
-    -- Fresh art at the same cache paths: re-key every tile image (see mapSerial).
-    mapSerial += 1
-    mapRoles = {}
-    for _, role in ipairs(result.mapped or {}) do
-      table.insert(mapRoles, role)
-    end
-    for _, role in ipairs(result.unmapped_roles or {}) do
-      table.insert(mapRoles, role)
-    end
-    mapTarget = ""
-    mapScanned = source
-
-    -- The grid stays on screen either way, so the panel never switches tabs
-    -- here; the themes list is only refreshed, not reloaded with its previews.
-    if result.written then
-      selected = result.name
-      setStatus(`{tr("built")}: {result.name}`, "primary")
-      noctalia.notify(tr("title"), `{tr("built")}: {result.name}`)
-      call("list", function(listResult)
-        if listResult ~= nil then
-          themes = listResult.themes or {}
-          render()
-        end
-      end)
-    elseif table.find(result.mapped or {}, "arrow") == nil then
-      setStatus(tr("needs_arrow"), "tertiary")
-    else
-      setStatus(tr("map_roles"))
-    end
-    render()
+    applyMapResult(st, source, result)
   end)
 end
 
@@ -947,13 +969,17 @@ end
 
 function onBuildPathChange(value)
   buildPath = trim(value)
+  -- A new folder invalidates every relpath the old grid was built from.
+  maps.build = newMapState("build")
+  buildReport = nil
 end
 
 function onBuildNameChange(value)
   buildName = trim(value)
 end
 
-function onBuild()
+local function doBuild(dryRun)
+  local st = maps.build
   local source = trim(buildPath)
   if source == "" or busy then
     return
@@ -969,15 +995,21 @@ function onBuild()
     fail(tr("not_a_folder"))
     return
   end
+  -- Same reasoning as doImport: the state decides, not the button label.
+  dryRun = dryRun or st.scanned ~= source
   busy = true
   buildReport = nil
-  setStatus(tr("building"))
+  setStatus(dryRun and tr("scanning") or tr("building"))
   render()
 
   local args = `build {shellQuote(noctalia.expandPath(source))}{imageArgs()}`
   if buildName ~= "" then
     args ..= ` --name {shellQuote(buildName)}`
   end
+  if dryRun then
+    args ..= " --dry-run"
+  end
+  args ..= mapArgs(st)
 
   call(args, function(result, err)
     if result == nil then
@@ -986,10 +1018,14 @@ function onBuild()
     end
     busy = false
     buildReport = result
-    selected = result.name
-    setStatus(`{tr("built")}: {result.name}`, "primary")
-    noctalia.notify(tr("title"), `{tr("built")}: {result.name}`)
-    tab = "themes"
-    loadThemes()
+    applyMapResult(st, source, result)
   end)
+end
+
+function onScanBuild()
+  doBuild(true)
+end
+
+function onBuild()
+  doBuild(false)
 end

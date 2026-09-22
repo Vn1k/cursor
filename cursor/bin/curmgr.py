@@ -33,13 +33,18 @@ NIRI_CONFIG = NIRI_DIR / "config.kdl"
 NIRI_CURSOR = NIRI_DIR / "cursor.kdl"
 ENV_CONF = CONFIG / "environment.d" / "90-xcursor.conf"
 PREVIEW_DIR = CACHE / "curmgr" / "preview"
-# Rendered source files from the last import, so the panel's mapping grid can
+# Rendered source files from the last scan, so the panel's mapping grid can
 # show every candidate file, not just the ones a role claimed. Cleared on
-# every import, never accumulates.
+# every scan, never accumulates.
 IMPORT_SOURCE_DIR = CACHE / "curmgr" / "import-sources"
-# Rendered role previews from the last import, so the grid shows what each
+# Rendered role previews from the last scan, so the grid shows what each
 # role currently holds (inf-mapped, heuristic-mapped, or user-overridden).
 IMPORT_ROLE_DIR = CACHE / "curmgr" / "import-roles"
+# Build gets its own pair: the panel can hold an Import grid and a Build grid at
+# the same time, and each render wipes its directory, so sharing one would blank
+# the other tab's thumbnails the moment you scanned here.
+BUILD_SOURCE_DIR = CACHE / "curmgr" / "build-sources"
+BUILD_ROLE_DIR = CACHE / "curmgr" / "build-roles"
 
 NOMINAL_SIZES = (24, 32, 48, 64, 96)
 MANAGED = "// Managed by the Noctalia cursor plugin - edits here are overwritten."
@@ -573,8 +578,8 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
         # Only roles the user could actually fill by mapping a file: location
         # and person have no Xcursor name to be written under.
         unmapped = [r for r in WIN_CURSORS if r not in mapped and r in XCURSOR_ALIASES]
-        files = _render_sources(root, candidates)
-        role_previews = _render_role_previews(role_frames)
+        files = _render_sources(root, candidates, IMPORT_SOURCE_DIR)
+        role_previews = _render_role_previews(role_frames, IMPORT_ROLE_DIR)
 
         # Two ways to stop before writing anything, one payload. A dry run is
         # how the panel shows its mapping grid *before* the convert, so the
@@ -723,9 +728,27 @@ def _load_pngs(paths: list[Path], hotspot, delay_ms: int):
     return frames
 
 
+def _build_hotspot(role: str, entry: dict):
+    """Where a build role points from. None means centre it in _load_pngs()."""
+    hotspot = entry.get("hotspot")
+    if hotspot is not None:
+        return tuple(hotspot)
+    if role in CENTERED:
+        return None
+    return (0, 0)  # tip-of-the-arrow roles point from their corner
+
+
+def _png_image(path: Path, target: int = 32):
+    """A source PNG scaled for the grid. Straight alpha, so nothing to undo."""
+    return _frames_image(_load_pngs([path], (0, 0), 0), target, premultiplied=False)
+
+
 def build_from_pngs(source: Path, name: str, sizes=NOMINAL_SIZES,
-                    filter_name="lanczos") -> dict:
+                    filter_name="lanczos", overrides: dict[str, str] | None = None,
+                    dry_run: bool = False) -> dict:
     import fnmatch
+
+    from win2xcur.theme import WIN_CURSORS, XCURSOR_ALIASES
 
     if not source.is_dir():
         raise Fail(f"not a directory: {source}")
@@ -736,6 +759,7 @@ def build_from_pngs(source: Path, name: str, sizes=NOMINAL_SIZES,
     inherits = spec.get("inherits", "Adwaita")
 
     entries = spec.get("cursors")
+    method = "spec.json" if entries else "heuristic"
     if not entries:
         # No spec: filename stem is the role, hotspot guessed from the role.
         entries = {}
@@ -752,17 +776,53 @@ def build_from_pngs(source: Path, name: str, sizes=NOMINAL_SIZES,
         if not matches:
             report[role] = f"no PNG matched {pattern!r}"
             continue
-        hotspot = entry.get("hotspot")
-        if hotspot is not None:
-            hotspot = tuple(hotspot)
-        elif role not in CENTERED:
-            hotspot = (0, 0)  # tip-of-the-arrow roles point from their corner
-        role_frames[role] = _load_pngs(matches, hotspot,
+        role_frames[role] = _load_pngs(matches, _build_hotspot(role, entry),
                                        entry.get("delay_ms", 50 if len(matches) > 1 else 0))
+
+    # The panel's mapping grid, same contract as import-win: a picked file beats
+    # the spec and the heuristic, an empty value un-maps the role. The file is
+    # loaded directly rather than rewritten into entry["png"], which would need
+    # the filename escaped against fnmatch.
+    # ponytail: one file, so a dropped tile makes the role a single static
+    # frame. spec.json's glob stays the way to build an animated role.
+    for role, rel in (overrides or {}).items():
+        if role not in WIN_CURSORS or role not in XCURSOR_ALIASES:
+            raise Fail(f"not a mappable role: {role}")
+        if rel == "":
+            role_frames.pop(role, None)
+            continue
+        path = (source / rel).resolve()
+        if not _is_under(path, source):
+            raise Fail(f"refusing to read outside {source}: {rel}")
+        if not path.is_file():
+            raise Fail(f"mapped file not found: {rel}")
+        entry = entries.get(role, {})
+        role_frames[role] = _load_pngs([path], _build_hotspot(role, entry),
+                                       entry.get("delay_ms", 0))
+        report.pop(role, None)
+
+    pngs = sorted(p for p in source.iterdir() if p.is_file() and p.suffix.lower() == ".png")
+    grid = {
+        "mapped": sorted(role_frames),
+        # Only roles a file could actually fill: location and person have no
+        # Xcursor name to be written under.
+        "unmapped_roles": [r for r in WIN_CURSORS
+                           if r not in role_frames and r in XCURSOR_ALIASES],
+        "files": _render_sources(source, pngs, BUILD_SOURCE_DIR, load=_png_image),
+        "role_previews": _render_role_previews(role_frames, BUILD_ROLE_DIR,
+                                               premultiplied=False),
+    }
+
+    # Same gate import-win uses: a scan never writes, and a theme with no arrow
+    # is not worth installing - hand back the grid so the user can assign one.
+    if dry_run or "arrow" not in role_frames:
+        return {"ok": True, "written": False, "name": name, "method": method,
+                "skipped": report, **grid}
 
     result = write_theme(name, role_frames, inherits=inherits, sizes=sizes,
                          filter_name=filter_name)
-    return {"ok": True, "name": name, "skipped": report, **result}
+    return {"ok": True, "written": True, "name": name, "method": method,
+            "skipped": report, **grid, **result}
 
 
 # --------------------------------------------------------------------------
@@ -783,10 +843,17 @@ def _unpremultiply(single):
     return out
 
 
-def _frames_image(frames, target: int = 32):
-    """First frame of a decoded cursor, unpremultiplied and scaled. Caller closes."""
+def _frames_image(frames, target: int = 32, premultiplied: bool = True):
+    """First frame of a decoded cursor, unpremultiplied and scaled. Caller closes.
+
+    `premultiplied` is what the frames came from: Xcursor and .cur store
+    premultiplied ARGB, but frames built by _load_pngs() are straight alpha
+    exactly as wand read them, and unpremultiplying those washes them out.
+    """
+    from wand.image import Image
+
     best = min(frames[0].images, key=lambda i: abs(i.nominal - target))
-    img = _unpremultiply(best.image)
+    img = _unpremultiply(best.image) if premultiplied else Image(image=best.image)
     if img.width != target:
         img.resize(target, max(1, round(img.height * target / img.width)), filter="lanczos")
     return img
@@ -799,21 +866,23 @@ def _cursor_image(path: Path, target: int = 32):
     return _frames_image(open_blob(path.read_bytes()).frames, target)
 
 
-def _render_sources(root: Path, paths: list[Path], target: int = 32) -> list[dict]:
+def _render_sources(root: Path, paths: list[Path], dest_dir: Path, target: int = 32,
+                    load=None) -> list[dict]:
     """Render every candidate source file, so the panel's mapping grid can offer
     all of them, not just the ones a role failed to claim."""
-    if IMPORT_SOURCE_DIR.exists():
-        shutil.rmtree(IMPORT_SOURCE_DIR, ignore_errors=True)
-    IMPORT_SOURCE_DIR.mkdir(parents=True, exist_ok=True)
+    load = load or _cursor_image
+    if dest_dir.exists():
+        shutil.rmtree(dest_dir, ignore_errors=True)
+    dest_dir.mkdir(parents=True, exist_ok=True)
 
     out = []
     # ponytail: 60 is enough for a real Windows pack (15 roles, a handful of
     # near-duplicates) without spending a render on every file in a dump.
     # Paginate in the panel if that ever stops being true.
     for index, src in enumerate(paths[:60]):
-        dest = IMPORT_SOURCE_DIR / f"{index}.png"
+        dest = dest_dir / f"{index}.png"
         try:
-            with _cursor_image(src, target) as img:
+            with load(src, target) as img:
                 img.format = "png"
                 dest.write_bytes(img.make_blob())
         except (ValueError, OSError, AssertionError, IndexError):
@@ -822,17 +891,18 @@ def _render_sources(root: Path, paths: list[Path], target: int = 32) -> list[dic
     return out
 
 
-def _render_role_previews(role_frames: dict, target: int = 32) -> dict:
+def _render_role_previews(role_frames: dict, dest_dir: Path, target: int = 32,
+                          premultiplied: bool = True) -> dict:
     """Render what each mapped role currently holds, for the mapping grid."""
-    if IMPORT_ROLE_DIR.exists():
-        shutil.rmtree(IMPORT_ROLE_DIR, ignore_errors=True)
-    IMPORT_ROLE_DIR.mkdir(parents=True, exist_ok=True)
+    if dest_dir.exists():
+        shutil.rmtree(dest_dir, ignore_errors=True)
+    dest_dir.mkdir(parents=True, exist_ok=True)
 
     out = {}
     for role, frames in role_frames.items():
-        dest = IMPORT_ROLE_DIR / f"{role}.png"
+        dest = dest_dir / f"{role}.png"
         try:
-            with _frames_image(frames, target) as img:
+            with _frames_image(frames, target, premultiplied) as img:
                 img.format = "png"
                 dest.write_bytes(img.make_blob())
         except (ValueError, OSError, AssertionError, IndexError):
@@ -894,6 +964,27 @@ def _shadow_opts(args) -> dict | None:
             "sigma": args.shadow_sigma, "xoffset": args.shadow_x, "yoffset": args.shadow_y}
 
 
+def _overrides(args) -> dict[str, str]:
+    """--map ROLE=RELPATH, the panel's mapping grid on the command line."""
+    out = {}
+    for entry in args.map_roles:
+        role, sep, rel = entry.partition("=")
+        if not sep:
+            raise Fail(f"--map wants ROLE=RELPATH, got: {entry}")
+        out[role] = rel
+    return out
+
+
+def _add_mapping_args(parser) -> None:
+    """Both builders feed the same grid, so both take the same two flags."""
+    parser.add_argument("--map", dest="map_roles", action="append", default=[],
+                        metavar="ROLE=RELPATH",
+                        help="assign a role to a source file (relative to the source folder); "
+                             "ROLE= with nothing after the = un-maps that role; repeatable")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="map and render previews without writing a theme")
+
+
 def _add_image_args(parser) -> None:
     parser.add_argument("--sizes", default=",".join(map(str, NOMINAL_SIZES)),
                         help="comma-separated nominal sizes to generate")
@@ -923,11 +1014,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("import-win", help="convert a Windows cursor pack into a theme")
     p.add_argument("source", type=Path, help="folder, archive, or .cur/.ani file")
     p.add_argument("--name", default="")
-    p.add_argument("--map", dest="map_roles", action="append", default=[], metavar="ROLE=RELPATH",
-                   help="assign a role to a source file (relative to the source folder); "
-                        "ROLE= with nothing after the = un-maps that role; repeatable")
-    p.add_argument("--dry-run", action="store_true",
-                   help="map and render previews without writing a theme")
+    _add_mapping_args(p)
     p.add_argument("--shadow", action="store_true", help="emulate the Windows drop shadow")
     p.add_argument("--shadow-color", default="#000000")
     p.add_argument("--shadow-radius", type=float, default=0.1)
@@ -939,6 +1026,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("build", help="build a theme from your own PNGs")
     p.add_argument("source", type=Path)
     p.add_argument("--name", default="")
+    _add_mapping_args(p)
     _add_image_args(p)
 
     p = sub.add_parser("install", help="install a finished Xcursor theme (folder or archive)")
@@ -961,20 +1049,15 @@ def main(argv=None) -> int:
             result = apply_theme(args.theme, args.size, args.hide_when_typing,
                                  args.hide_after_inactive_ms)
         elif args.cmd == "import-win":
-            overrides = {}
-            for entry in args.map_roles:
-                role, sep, rel = entry.partition("=")
-                if not sep:
-                    raise Fail(f"--map wants ROLE=RELPATH, got: {entry}")
-                overrides[role] = rel
             result = import_windows(
                 args.source, args.name, _shadow_opts(args),
-                tuple(int(s) for s in args.sizes.split(",")), args.filter_name, overrides,
-                args.dry_run)
+                tuple(int(s) for s in args.sizes.split(",")), args.filter_name,
+                _overrides(args), args.dry_run)
         elif args.cmd == "build":
             result = build_from_pngs(
                 args.source, args.name,
-                tuple(int(s) for s in args.sizes.split(",")), args.filter_name)
+                tuple(int(s) for s in args.sizes.split(",")), args.filter_name,
+                _overrides(args), args.dry_run)
         elif args.cmd == "install":
             result = install_theme(args.source, args.name)
         elif args.cmd == "remove":
