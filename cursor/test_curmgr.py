@@ -544,6 +544,7 @@ def test_apply_writes_every_layer():
         assert result["layers"]["niri"]["ok"], result["layers"]["niri"]
 
         kdl = (niri_dir / "cursor.kdl").read_text()
+        assert kdl.startswith("// Managed by"), kdl
         assert 'xcursor-theme "Adwaita"' in kdl
         assert "xcursor-size 32" in kdl
         assert "hide-when-typing" in kdl
@@ -654,6 +655,7 @@ def check_compositor(name):
         assert result["layers"][name]["ok"], result["layers"][name]
 
         written = cursor.read_text()
+        assert written.startswith("# Managed by"), (name, written)
         for line in expected:
             assert line in written, (name, line, written)
 
@@ -683,6 +685,24 @@ def test_apply_sway():
 
 def test_apply_mango():
     check_compositor("mango")
+
+
+def test_a_positive_hide_timeout_never_reads_back_as_never():
+    """A sub-second delay must not turn into 0, which means "never hide"."""
+    for name, (config_rel, body, *_rest) in COMPOSITOR_CASES.items():
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config = home / ".config" / config_rel
+            config.parent.mkdir(parents=True)
+            config.write_text(body)
+
+            run(["apply", "Adwaita", "--hide-after-inactive-ms", "300"], home=home)
+            first = run(["current"], home=home)["hide_after_inactive_ms"]
+            assert first > 0, (name, first)
+
+            # and the value the panel shows must survive being written back
+            run(["apply", "Adwaita", "--hide-after-inactive-ms", str(first)], home=home)
+            assert run(["current"], home=home)["hide_after_inactive_ms"] == first, name
 
 
 def test_apply_rejects_unknown_theme():

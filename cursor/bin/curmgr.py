@@ -206,6 +206,16 @@ def read_current() -> dict:
 # applying
 # --------------------------------------------------------------------------
 
+def _ms_to_s(ms: int) -> int:
+    """Milliseconds to whole seconds, rounding up.
+
+    Hyprland and mango measure this in seconds and read 0 as "never hide", so
+    anything the user asked for must survive as at least 1 - rounding down (or
+    to-nearest) turns a 300ms delay into the off switch.
+    """
+    return -(-ms // 1000)
+
+
 def _render_niri(theme: str, size: int, hide_typing: bool, hide_ms: int, config_text: str) -> str:
     lines = ["cursor {", f'    xcursor-theme "{theme}"', f"    xcursor-size {size}"]
     if hide_typing:
@@ -233,7 +243,7 @@ def _render_hyprland(theme: str, size: int, hide_typing: bool, hide_ms: int, con
         "cursor {",
         f"    hide_on_key_press = {'true' if hide_typing else 'false'}",
         # cursor:inactive_timeout is a float in seconds, capped at 20 upstream.
-        f"    inactive_timeout = {min(20, round(hide_ms / 1000))}",
+        f"    inactive_timeout = {min(20, _ms_to_s(hide_ms))}",
         "}",
     ]) + "\n"
 
@@ -254,7 +264,7 @@ def _render_mango(theme: str, size: int, hide_typing: bool, hide_ms: int, config
         f"cursor_theme={theme}",
         f"cursor_size={size}",
         f"cursor_hide_on_keypress={1 if hide_typing else 0}",
-        f"cursor_hide_timeout={round(hide_ms / 1000)}",
+        f"cursor_hide_timeout={_ms_to_s(hide_ms)}",
     ]) + "\n"
 
 
