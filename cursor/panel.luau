@@ -35,7 +35,11 @@ local installPath = ""
 -- Deleting a theme is destructive and a dialog would dismiss the panel, so the
 -- confirmation is the button itself: first click arms, second click removes.
 local pendingRemove = ""
-local report = nil
+-- Import and Build each get their own report: they used to share one global,
+-- which is how a Windows import's mapping grid ended up rendering under Build
+-- too - both tabs called the same reportView() off the same variable.
+local importReport = nil
+local buildReport = nil
 -- Manual role mapping, built from the last import's `files`/`role_previews`.
 -- `mapping` (role -> relpath) survives a re-convert so a fix sticks; the rest
 -- is redrawn from each import's result.
@@ -394,6 +398,14 @@ local function wrapTiles(tiles, columns)
   return ui.column({ gap = 8, align = "stretch" }, rows)
 end
 
+-- Shared by both the click-to-arm flow and a drag-and-drop, so a file always
+-- lands the same way regardless of which gesture placed it.
+local function assign(role, rel)
+  mapping[role] = rel
+  mapTarget = ""
+  render()
+end
+
 local function mapRoleTile(role)
   local isArmed = mapTarget == role
   local hasOverride = mapping[role] ~= nil
@@ -417,11 +429,18 @@ local function mapRoleTile(role)
     frame = ui.box({ width = MAP_TILE, height = MAP_TILE, fill = "surface_variant",
                      radius = 8, border = border, borderWidth = isArmed and 3 or 1, onClick = onClick })
   end
-  return ui.column({ key = `role_{role}`, gap = 2, align = "center", width = 60 }, {
+  local tile = ui.column({ key = `role_{role}`, gap = 2, align = "center", width = 60 }, {
     frame,
     ui.label({ text = role, fontSize = 10, maxLines = 1, maxWidth = 60,
                textAlign = "center", color = "on_surface_variant" }),
   })
+  -- Every role is a drop target: dragging a file tile onto it assigns it,
+  -- the same as arming the role then clicking the file.
+  return ui.dropZone({
+    key = `dropzone_{role}`, accepts = { "cursor-file" }, value = role,
+    onDrop = function(payload) assign(role, payload) end,
+    direction = "column", radius = 8, hitSlop = 6,
+  }, { tile })
 end
 
 local function mapFileTile(file)
@@ -429,16 +448,20 @@ local function mapFileTile(file)
     if mapTarget == "" then
       return
     end
-    mapping[mapTarget] = file.rel
-    mapTarget = ""
-    render()
+    assign(mapTarget, file.rel)
   end
-  return ui.column({ key = `file_{file.rel}`, gap = 2, align = "center", width = 60 }, {
+  local tile = ui.column({ key = `file_{file.rel}`, gap = 2, align = "center", width = 60 }, {
     ui.image({ width = MAP_TILE, height = MAP_TILE, path = file.preview, fit = "contain",
                radius = 8, border = "outline", borderWidth = 1, onClick = onClick }),
     ui.label({ text = file.file, fontSize = 10, maxLines = 1, maxWidth = 60,
                textAlign = "center", color = "on_surface_variant" }),
   })
+  -- Click-to-arm still works (see mapRoleTile) for anything that can't drag;
+  -- this just adds dragging the tile itself onto a role as a shortcut.
+  return ui.dragSource({
+    key = `dragsource_{file.rel}`, dragType = "cursor-file", payload = file.rel,
+    tooltip = file.file,
+  }, { tile })
 end
 
 -- Always shown after a convert, even when every role mapped: any tile can be
@@ -466,31 +489,35 @@ local function mappingGrid()
   })
 end
 
-local function reportView()
-  if report == nil then
+-- `withGrid` is import-only: a PNG build has no Windows roles to assign, so
+-- Build's report never carries the mapping grid, even if one is present.
+local function reportView(rep, withGrid)
+  if rep == nil then
     return ui.box({ height = 0 })
   end
   local lines = {}
-  if report.method ~= nil then
-    table.insert(lines, ui.label({ text = `{tr("method")}: {report.method}`,
+  if rep.method ~= nil then
+    table.insert(lines, ui.label({ text = `{tr("method")}: {rep.method}`,
                                    fontSize = 12, color = "on_surface_variant" }))
   end
-  if report.written == false then
+  if rep.written == false then
     table.insert(lines, ui.label({ text = tr("needs_arrow"), fontSize = 12, color = "tertiary" }))
   end
-  if report.mapped ~= nil and #report.mapped > 0 then
-    table.insert(lines, ui.label({ text = `{tr("mapped")}: {table.concat(report.mapped, ", ")}`,
+  if rep.mapped ~= nil and #rep.mapped > 0 then
+    table.insert(lines, ui.label({ text = `{tr("mapped")}: {table.concat(rep.mapped, ", ")}`,
                                    fontSize = 12, color = "on_surface_variant" }))
   end
-  if report.unmapped_roles ~= nil and #report.unmapped_roles > 0 then
+  if rep.unmapped_roles ~= nil and #rep.unmapped_roles > 0 then
     table.insert(lines, ui.label({
-      text = `{tr("unmapped")}: {table.concat(report.unmapped_roles, ", ")}`,
+      text = `{tr("unmapped")}: {table.concat(rep.unmapped_roles, ", ")}`,
       fontSize = 12, color = "tertiary",
     }))
     table.insert(lines, ui.label({ text = tr("unmapped_hint"), fontSize = 11,
                                    color = "on_surface_variant" }))
   end
-  table.insert(lines, mappingGrid())
+  if withGrid then
+    table.insert(lines, mappingGrid())
+  end
   return ui.column({ gap = 8, align = "stretch" }, lines)
 end
 
@@ -515,7 +542,7 @@ local function importTab()
                   variant = "primary",
                   onClick = "onImport", enabled = not busy and trim(importPath) ~= "" }),
     }),
-    ui.scroll({ flexGrow = 1, gap = 8 }, { reportView() }),
+    ui.scroll({ flexGrow = 1, gap = 8 }, { reportView(importReport, true) }),
   })
 end
 
@@ -536,7 +563,7 @@ local function buildTab()
       ui.button({ key = "build", text = tr("build"), variant = "primary",
                   onClick = "onBuild", enabled = not busy and trim(buildPath) ~= "" }),
     }),
-    ui.scroll({ flexGrow = 1, gap = 8 }, { reportView() }),
+    ui.scroll({ flexGrow = 1, gap = 8 }, { reportView(buildReport, false) }),
   })
 end
 
@@ -786,7 +813,7 @@ function onImportPathChange(value)
   mapRoles = {}
   mapPreviews = {}
   mapTarget = ""
-  report = nil
+  importReport = nil
 end
 
 function onImportNameChange(value)
@@ -808,7 +835,7 @@ function onImport()
     return
   end
   busy = true
-  report = nil
+  importReport = nil
   setStatus(tr("converting"))
   render()
 
@@ -829,7 +856,7 @@ function onImport()
       return
     end
     busy = false
-    report = result
+    importReport = result
     mapFiles = result.files or {}
     mapPreviews = result.role_previews or {}
     mapRoles = {}
@@ -885,7 +912,7 @@ function onBuild()
     return
   end
   busy = true
-  report = nil
+  buildReport = nil
   setStatus(tr("building"))
   render()
 
@@ -900,7 +927,7 @@ function onBuild()
       return
     end
     busy = false
-    report = result
+    buildReport = result
     selected = result.name
     setStatus(`{tr("built")}: {result.name}`, "primary")
     noctalia.notify(tr("title"), `{tr("built")}: {result.name}`)

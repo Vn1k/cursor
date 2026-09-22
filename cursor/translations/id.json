@@ -20,7 +20,7 @@
   "import_path": "Folder pack kursor",
   "map_roles": "Tetapkan kursor",
   "map_pick": "Pilih file untuk",
-  "map_source_files": "File dalam pack ini — pilih peran di atas dulu",
+  "map_source_files": "File dalam pack ini — seret ke sebuah peran, atau pilih peran lalu file",
   "needs_arrow": "Kursor panah tidak ditemukan — tetapkan satu di bawah, lalu konversi lagi.",
   "convert_again": "Konversi lagi",
   "install": "Pasang",

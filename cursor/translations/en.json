@@ -20,7 +20,7 @@
   "import_path": "Cursor pack folder",
   "map_roles": "Assign cursors",
   "map_pick": "Pick a file for",
-  "map_source_files": "Files in this pack — pick a role above first",
+  "map_source_files": "Files in this pack — drag one onto a role, or pick a role then a file",
   "needs_arrow": "No arrow cursor was found — assign one below, then convert again.",
   "convert_again": "Convert again",
   "install": "Install",
