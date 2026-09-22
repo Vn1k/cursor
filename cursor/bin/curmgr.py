@@ -33,9 +33,13 @@ NIRI_CONFIG = NIRI_DIR / "config.kdl"
 NIRI_CURSOR = NIRI_DIR / "cursor.kdl"
 ENV_CONF = CONFIG / "environment.d" / "90-xcursor.conf"
 PREVIEW_DIR = CACHE / "curmgr" / "preview"
-# Rendered source files from the last failed import, so the panel can show the
-# user what it could not place. Cleared on every import, never accumulates.
-LEFTOVER_DIR = CACHE / "curmgr" / "leftovers"
+# Rendered source files from the last import, so the panel's mapping grid can
+# show every candidate file, not just the ones a role claimed. Cleared on
+# every import, never accumulates.
+IMPORT_SOURCE_DIR = CACHE / "curmgr" / "import-sources"
+# Rendered role previews from the last import, so the grid shows what each
+# role currently holds (inf-mapped, heuristic-mapped, or user-overridden).
+IMPORT_ROLE_DIR = CACHE / "curmgr" / "import-roles"
 
 NOMINAL_SIZES = (24, 32, 48, 64, 96)
 MANAGED = "// Managed by the Noctalia cursor plugin - edits here are overwritten."
@@ -501,7 +505,7 @@ def _source_dir(path: Path) -> tuple[Path, tempfile.TemporaryDirectory | None]:
 
 
 def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZES,
-                   filter_name="lanczos") -> dict:
+                   filter_name="lanczos", overrides: dict[str, str] | None = None) -> dict:
     from win2xcur.parser import open_blob
     from win2xcur.parser.inf import parse_inf
     from win2xcur.theme import WIN_CURSORS, XCURSOR_ALIASES
@@ -531,7 +535,6 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
                 name = name or parsed.name
                 break
 
-        claimed: set[Path] = set()
         if not role_frames:
             # Packs ship near-duplicates - "Normal Select" beside "My Melody
             # Normal Select", "Busy" beside "Busy 2" - which score the same.
@@ -547,32 +550,50 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
                     scored[role] = (key, path)
             for role, (_, path) in scored.items():
                 role_frames[role] = open_blob(path.read_bytes()).frames
-                claimed.add(path)
 
+        # The panel's mapping grid: a user-picked file wins over both the .inf
+        # and the heuristic guess, and an empty value un-maps a role the
+        # heuristic got wrong rather than leaving no way to blank it.
+        for role, rel in (overrides or {}).items():
+            if role not in WIN_CURSORS or role not in XCURSOR_ALIASES:
+                raise Fail(f"not a mappable role: {role}")
+            if rel == "":
+                role_frames.pop(role, None)
+                continue
+            path = (root / rel).resolve()
+            if not _is_under(path, root):
+                raise Fail(f"refusing to read outside {root}: {rel}")
+            if not path.is_file():
+                raise Fail(f"mapped file not found: {rel}")
+            role_frames[role] = open_blob(path.read_bytes()).frames
+
+        mapped = set(role_frames)
+        used = {p.name for p in candidates}
+        # Only roles the user could actually fill by mapping a file: location
+        # and person have no Xcursor name to be written under.
+        unmapped = [r for r in WIN_CURSORS if r not in mapped and r in XCURSOR_ALIASES]
+        files = _render_sources(root, candidates)
+        role_previews = _render_role_previews(role_frames)
+
+        # No arrow is not a hard failure: hand back the grid so the panel can
+        # ask the user to assign one, instead of erroring with nothing to act on.
         if "arrow" not in role_frames:
-            raise Fail("could not identify the basic arrow cursor; map it manually")
+            return {
+                "ok": True, "written": False, "name": name, "method": method,
+                "inf_error": inf_error, "mapped": sorted(mapped),
+                "unmapped_roles": unmapped, "files": files, "role_previews": role_previews,
+                "source_files": sorted(used),
+            }
 
         result = write_theme(name, role_frames, sizes=sizes, filter_name=filter_name,
                              shadow_opts=shadow_opts)
-        mapped = set(role_frames)
-        used = {p.name for p in candidates}
-        # Only roles the user could actually fill by renaming a file: location
-        # and person have no Xcursor name to be written under.
-        unmapped = [r for r in WIN_CURSORS if r not in mapped and r in XCURSOR_ALIASES]
-
-        # Show what could not be placed, but only when something was left empty.
-        # A pack that mapped everything may still have spare files - "Busy 2"
-        # beside "Busy" - and those are noise, not help. `claimed` is empty on
-        # the .inf path, which names its own files and needs no such help.
-        leftovers = []
-        if unmapped and claimed:
-            leftovers = _render_leftovers([p for p in candidates if p not in claimed])
 
         return {
-            "ok": True, "name": name, "method": method, "inf_error": inf_error,
+            "ok": True, "written": True, "name": name, "method": method, "inf_error": inf_error,
             "mapped": sorted(mapped),
             "unmapped_roles": unmapped,
-            "leftovers": leftovers,
+            "files": files,
+            "role_previews": role_previews,
             "source_files": sorted(used),
             **result,
         }
@@ -757,36 +778,61 @@ def _unpremultiply(single):
     return out
 
 
-def _cursor_image(path: Path, target: int = 32):
-    """First frame of a cursor file, unpremultiplied and scaled. Caller closes."""
-    from win2xcur.parser import open_blob
-
-    frame = open_blob(path.read_bytes()).frames[0]
-    best = min(frame.images, key=lambda i: abs(i.nominal - target))
+def _frames_image(frames, target: int = 32):
+    """First frame of a decoded cursor, unpremultiplied and scaled. Caller closes."""
+    best = min(frames[0].images, key=lambda i: abs(i.nominal - target))
     img = _unpremultiply(best.image)
     if img.width != target:
         img.resize(target, max(1, round(img.height * target / img.width)), filter="lanczos")
     return img
 
 
-def _render_leftovers(paths: list[Path], target: int = 32) -> list[dict]:
-    """Render source files no role claimed, so the user can see what to rename."""
-    if LEFTOVER_DIR.exists():
-        shutil.rmtree(LEFTOVER_DIR, ignore_errors=True)
-    LEFTOVER_DIR.mkdir(parents=True, exist_ok=True)
+def _cursor_image(path: Path, target: int = 32):
+    """First frame of a cursor file, unpremultiplied and scaled. Caller closes."""
+    from win2xcur.parser import open_blob
+
+    return _frames_image(open_blob(path.read_bytes()).frames, target)
+
+
+def _render_sources(root: Path, paths: list[Path], target: int = 32) -> list[dict]:
+    """Render every candidate source file, so the panel's mapping grid can offer
+    all of them, not just the ones a role failed to claim."""
+    if IMPORT_SOURCE_DIR.exists():
+        shutil.rmtree(IMPORT_SOURCE_DIR, ignore_errors=True)
+    IMPORT_SOURCE_DIR.mkdir(parents=True, exist_ok=True)
 
     out = []
-    # ponytail: 12 is enough to see a pack's strays without spending a render on
-    # every file in a dump. Paginate in the panel if that ever stops being true.
-    for index, src in enumerate(paths[:12]):
-        dest = LEFTOVER_DIR / f"{index}.png"
+    # ponytail: 60 is enough for a real Windows pack (15 roles, a handful of
+    # near-duplicates) without spending a render on every file in a dump.
+    # Paginate in the panel if that ever stops being true.
+    for index, src in enumerate(paths[:60]):
+        dest = IMPORT_SOURCE_DIR / f"{index}.png"
         try:
             with _cursor_image(src, target) as img:
                 img.format = "png"
                 dest.write_bytes(img.make_blob())
         except (ValueError, OSError, AssertionError, IndexError):
             continue  # an unreadable stray is not worth failing the import over
-        out.append({"file": src.name, "preview": str(dest)})
+        out.append({"file": src.name, "rel": str(src.relative_to(root)), "preview": str(dest)})
+    return out
+
+
+def _render_role_previews(role_frames: dict, target: int = 32) -> dict:
+    """Render what each mapped role currently holds, for the mapping grid."""
+    if IMPORT_ROLE_DIR.exists():
+        shutil.rmtree(IMPORT_ROLE_DIR, ignore_errors=True)
+    IMPORT_ROLE_DIR.mkdir(parents=True, exist_ok=True)
+
+    out = {}
+    for role, frames in role_frames.items():
+        dest = IMPORT_ROLE_DIR / f"{role}.png"
+        try:
+            with _frames_image(frames, target) as img:
+                img.format = "png"
+                dest.write_bytes(img.make_blob())
+        except (ValueError, OSError, AssertionError, IndexError):
+            continue
+        out[role] = str(dest)
     return out
 
 
@@ -872,6 +918,9 @@ def main(argv=None) -> int:
     p = sub.add_parser("import-win", help="convert a Windows cursor pack into a theme")
     p.add_argument("source", type=Path, help="folder, archive, or .cur/.ani file")
     p.add_argument("--name", default="")
+    p.add_argument("--map", dest="map_roles", action="append", default=[], metavar="ROLE=RELPATH",
+                   help="assign a role to a source file (relative to the source folder); "
+                        "ROLE= with nothing after the = un-maps that role; repeatable")
     p.add_argument("--shadow", action="store_true", help="emulate the Windows drop shadow")
     p.add_argument("--shadow-color", default="#000000")
     p.add_argument("--shadow-radius", type=float, default=0.1)
@@ -905,9 +954,15 @@ def main(argv=None) -> int:
             result = apply_theme(args.theme, args.size, args.hide_when_typing,
                                  args.hide_after_inactive_ms)
         elif args.cmd == "import-win":
+            overrides = {}
+            for entry in args.map_roles:
+                role, sep, rel = entry.partition("=")
+                if not sep:
+                    raise Fail(f"--map wants ROLE=RELPATH, got: {entry}")
+                overrides[role] = rel
             result = import_windows(
                 args.source, args.name, _shadow_opts(args),
-                tuple(int(s) for s in args.sizes.split(",")), args.filter_name)
+                tuple(int(s) for s in args.sizes.split(",")), args.filter_name, overrides)
         elif args.cmd == "build":
             result = build_from_pngs(
                 args.source, args.name,

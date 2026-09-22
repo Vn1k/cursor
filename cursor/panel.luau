@@ -36,6 +36,15 @@ local installPath = ""
 -- confirmation is the button itself: first click arms, second click removes.
 local pendingRemove = ""
 local report = nil
+-- Manual role mapping, built from the last import's `files`/`role_previews`.
+-- `mapping` (role -> relpath) survives a re-convert so a fix sticks; the rest
+-- is redrawn from each import's result.
+local mapping = {}
+local mapFiles = {}
+local mapRoles = {}
+local mapPreviews = {}
+-- The role tile the user clicked, waiting for a file tile to pair it with.
+local mapTarget = ""
 -- ui.input only reads `value` when it mounts, so a path chosen by the picker
 -- needs a new key to land in the field at all.
 local pickSeq = 0
@@ -368,6 +377,95 @@ local function themesTab()
   })
 end
 
+local MAP_TILE = 44
+local MAP_COLUMNS = 10
+
+-- Rows of fixed-width tiles, wrapped at `columns` per row. Both the role grid
+-- and the file strip below it use this; only the tile contents differ.
+local function wrapTiles(tiles, columns)
+  local rows, row = {}, {}
+  for index, tile in ipairs(tiles) do
+    table.insert(row, tile)
+    if #row == columns or index == #tiles then
+      table.insert(rows, ui.row({ gap = 8, align = "start" }, row))
+      row = {}
+    end
+  end
+  return ui.column({ gap = 8, align = "stretch" }, rows)
+end
+
+local function mapRoleTile(role)
+  local isArmed = mapTarget == role
+  local hasOverride = mapping[role] ~= nil
+  local preview = mapPreviews[role]
+  local border = isArmed and "primary" or (hasOverride and "tertiary" or "outline")
+  local onClick = function()
+    if mapTarget == role then
+      -- second click on an armed role clears any override, back to the guess
+      mapping[role] = nil
+      mapTarget = ""
+    else
+      mapTarget = role
+    end
+    render()
+  end
+  local frame
+  if preview ~= nil then
+    frame = ui.image({ width = MAP_TILE, height = MAP_TILE, path = preview, fit = "contain",
+                       radius = 8, border = border, borderWidth = isArmed and 3 or 1, onClick = onClick })
+  else
+    frame = ui.box({ width = MAP_TILE, height = MAP_TILE, fill = "surface_variant",
+                     radius = 8, border = border, borderWidth = isArmed and 3 or 1, onClick = onClick })
+  end
+  return ui.column({ key = `role_{role}`, gap = 2, align = "center", width = 60 }, {
+    frame,
+    ui.label({ text = role, fontSize = 10, maxLines = 1, maxWidth = 60,
+               textAlign = "center", color = "on_surface_variant" }),
+  })
+end
+
+local function mapFileTile(file)
+  local onClick = function()
+    if mapTarget == "" then
+      return
+    end
+    mapping[mapTarget] = file.rel
+    mapTarget = ""
+    render()
+  end
+  return ui.column({ key = `file_{file.rel}`, gap = 2, align = "center", width = 60 }, {
+    ui.image({ width = MAP_TILE, height = MAP_TILE, path = file.preview, fit = "contain",
+               radius = 8, border = "outline", borderWidth = 1, onClick = onClick }),
+    ui.label({ text = file.file, fontSize = 10, maxLines = 1, maxWidth = 60,
+               textAlign = "center", color = "on_surface_variant" }),
+  })
+end
+
+-- Always shown after a convert, even when every role mapped: any tile can be
+-- reassigned, not only the empty ones. Click a role, then a file, to assign.
+local function mappingGrid()
+  if #mapRoles == 0 then
+    return ui.box({ height = 0 })
+  end
+  local roleTiles = {}
+  for _, role in ipairs(mapRoles) do
+    table.insert(roleTiles, mapRoleTile(role))
+  end
+  local fileTiles = {}
+  for _, file in ipairs(mapFiles) do
+    table.insert(fileTiles, mapFileTile(file))
+  end
+  return ui.column({ gap = 8, align = "stretch" }, {
+    ui.label({ text = tr("map_roles"), fontSize = 12, color = "on_surface_variant" }),
+    wrapTiles(roleTiles, MAP_COLUMNS),
+    ui.label({
+      text = mapTarget ~= "" and `{tr("map_pick")} {mapTarget}` or tr("map_source_files"),
+      fontSize = 11, color = mapTarget ~= "" and "primary" or "on_surface_variant",
+    }),
+    wrapTiles(fileTiles, MAP_COLUMNS),
+  })
+end
+
 local function reportView()
   if report == nil then
     return ui.box({ height = 0 })
@@ -376,6 +474,9 @@ local function reportView()
   if report.method ~= nil then
     table.insert(lines, ui.label({ text = `{tr("method")}: {report.method}`,
                                    fontSize = 12, color = "on_surface_variant" }))
+  end
+  if report.written == false then
+    table.insert(lines, ui.label({ text = tr("needs_arrow"), fontSize = 12, color = "tertiary" }))
   end
   if report.mapped ~= nil and #report.mapped > 0 then
     table.insert(lines, ui.label({ text = `{tr("mapped")}: {table.concat(report.mapped, ", ")}`,
@@ -389,22 +490,8 @@ local function reportView()
     table.insert(lines, ui.label({ text = tr("unmapped_hint"), fontSize = 11,
                                    color = "on_surface_variant" }))
   end
-  -- The engine renders whatever it could not place, so renaming is something
-  -- the user can see rather than guess. Only present when a role went empty.
-  if report.leftovers ~= nil and #report.leftovers > 0 then
-    table.insert(lines, ui.label({ text = tr("leftovers"), fontSize = 12,
-                                   color = "on_surface_variant" }))
-    for _, item in ipairs(report.leftovers) do
-      table.insert(lines, ui.row({ key = `left_{item.file}`, gap = 8, align = "center" }, {
-        ui.image({ path = item.preview, width = 32, height = 32, fit = "contain" }),
-        ui.label({ text = item.file, fontSize = 12, maxLines = 1, flexGrow = 1 }),
-      }))
-    end
-  end
-  if #lines == 0 then
-    return ui.box({ height = 0 })
-  end
-  return ui.column({ gap = 4, align = "stretch" }, lines)
+  table.insert(lines, mappingGrid())
+  return ui.column({ gap = 8, align = "stretch" }, lines)
 end
 
 local function importTab()
@@ -424,7 +511,8 @@ local function importTab()
                   variant = importShadow and "primary" or "outline",
                   tooltip = tr("shadow_tooltip"), onClick = "onToggleShadow" }),
       ui.spacer({ flexGrow = 1 }),
-      ui.button({ key = "convert", text = tr("convert"), variant = "primary",
+      ui.button({ key = "convert", text = next(mapping) ~= nil and tr("convert_again") or tr("convert"),
+                  variant = "primary",
                   onClick = "onImport", enabled = not busy and trim(importPath) ~= "" }),
     }),
     ui.scroll({ flexGrow = 1, gap = 8 }, { reportView() }),
@@ -692,6 +780,13 @@ end
 
 function onImportPathChange(value)
   importPath = trim(value)
+  -- A new source invalidates every relpath the old grid was built from.
+  mapping = {}
+  mapFiles = {}
+  mapRoles = {}
+  mapPreviews = {}
+  mapTarget = ""
+  report = nil
 end
 
 function onImportNameChange(value)
@@ -724,6 +819,9 @@ function onImport()
   if importShadow then
     args ..= " --shadow"
   end
+  for role, rel in pairs(mapping) do
+    args ..= ` --map {shellQuote(`{role}={rel}`)}`
+  end
 
   call(args, function(result, err)
     if result == nil then
@@ -732,11 +830,33 @@ function onImport()
     end
     busy = false
     report = result
-    selected = result.name
-    setStatus(`{tr("built")}: {result.name}`, "primary")
-    noctalia.notify(tr("title"), `{tr("built")}: {result.name}`)
-    tab = "themes"
-    loadThemes()
+    mapFiles = result.files or {}
+    mapPreviews = result.role_previews or {}
+    mapRoles = {}
+    for _, role in ipairs(result.mapped or {}) do
+      table.insert(mapRoles, role)
+    end
+    for _, role in ipairs(result.unmapped_roles or {}) do
+      table.insert(mapRoles, role)
+    end
+    mapTarget = ""
+
+    -- The grid stays on screen either way, so the panel never switches tabs
+    -- here; the themes list is only refreshed, not reloaded with its previews.
+    if result.written then
+      selected = result.name
+      setStatus(`{tr("built")}: {result.name}`, "primary")
+      noctalia.notify(tr("title"), `{tr("built")}: {result.name}`)
+      call("list", function(listResult)
+        if listResult ~= nil then
+          themes = listResult.themes or {}
+          render()
+        end
+      end)
+    else
+      setStatus(tr("needs_arrow"), "tertiary")
+    end
+    render()
   end)
 end
 

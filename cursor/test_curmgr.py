@@ -238,8 +238,7 @@ def test_import_maps_real_windows_scheme_names():
                       "--sizes", "32"], home=home)
         assert result["method"] == "heuristic", result["method"]
         assert result["unmapped_roles"] == [], result["unmapped_roles"]
-        # Nothing went unplaced, so spare files stay quiet rather than noisy.
-        assert result["leftovers"] == [], result["leftovers"]
+        assert result["written"] is True, result
 
         from win2xcur.parser import open_blob
         cursors = home / ".local/share/icons/SchemeTest/cursors"
@@ -304,8 +303,8 @@ def test_a_file_named_after_its_role_wins():
 
 
 def test_unplaceable_files_come_back_rendered():
-    """When a role goes empty the panel shows what was left over, so renaming
-    is something the user can see instead of guess."""
+    """When a role goes empty the panel's grid shows every source file (so the
+    user can assign the stray one), not just the ones a role claimed."""
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
         pack = home / "pack"
@@ -320,10 +319,10 @@ def test_unplaceable_files_come_back_rendered():
                       "--sizes", "32"], home=home)
         assert "unavailable" in result["unmapped_roles"], result["unmapped_roles"]
 
-        assert len(result["leftovers"]) == 1, result["leftovers"]
-        left = result["leftovers"][0]
-        assert left["file"] == "zzz mystery.cur", left
-        png = Path(left["preview"])
+        assert len(result["files"]) == 13, result["files"]
+        strays = [f for f in result["files"] if f["file"] == "zzz mystery.cur"]
+        assert len(strays) == 1, result["files"]
+        png = Path(strays[0]["preview"])
         assert png.is_file(), png
         assert png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
 
@@ -398,6 +397,81 @@ def test_import_from_zip():
         result = run(["import-win", archive, "--name", "Zipped", "--sizes", "32"], home=home)
         assert "arrow" in result["mapped"]
         assert (home / ".local/share/icons/Zipped/cursors/left_ptr").is_symlink()
+
+
+def test_map_overrides_a_guess():
+    """--map wins over whatever the heuristic picked, inf or no inf."""
+    from win2xcur.parser import open_blob
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        pack = home / "pack"
+        pack.mkdir(parents=True)
+        make_cur(pack / "normal.cur", hotspot=(1, 1))
+        # The heuristic's own hint list points "link" at this file.
+        make_cur(pack / "link.cur", hotspot=(2, 2))
+        make_cur(pack / "override_me.cur", hotspot=(9, 9))
+
+        result = run(["import-win", str(pack), "--name", "MapOverride", "--sizes", "32",
+                      "--map", "link=override_me.cur"], home=home)
+        assert result["written"] is True, result
+
+        cursors = home / ".local/share/icons/MapOverride/cursors"
+        hand = open_blob((cursors / "hand2").read_bytes()).frames[0]
+        assert {i.hotspot for i in hand.images} == {(9, 9)}, "override lost to the guess"
+
+
+def test_map_fills_a_role_the_heuristic_missed():
+    """A file the heuristic can't place comes back in `files`; --map on a
+    second run assigns it and clears the role from `unmapped_roles`."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        pack = home / "pack"
+        pack.mkdir(parents=True)
+        for stem in ("normal", "help", "busy", "text", "precision", "move",
+                     "vert", "horz", "dgn1", "dgn2", "link", "alt"):
+            make_cur(pack / f"{stem}.cur", hotspot=(1, 1))
+        make_cur(pack / "zz1.cur", hotspot=(9, 9))
+
+        first = run(["import-win", str(pack), "--name", "MapFill", "--sizes", "32"], home=home)
+        assert "unavailable" in first["unmapped_roles"], first["unmapped_roles"]
+        assert any(f["file"] == "zz1.cur" for f in first["files"]), first["files"]
+
+        second = run(["import-win", str(pack), "--name", "MapFill", "--sizes", "32",
+                      "--map", "unavailable=zz1.cur"], home=home)
+        assert "unavailable" not in second["unmapped_roles"], second["unmapped_roles"]
+        cursors = home / ".local/share/icons/MapFill/cursors"
+        assert (cursors / "not-allowed").is_file(), sorted(p.name for p in cursors.iterdir())
+
+
+def test_pack_without_an_arrow_returns_a_grid():
+    """No recognisable arrow used to be a hard failure; it now comes back as
+    a grid the panel can fill in, and nothing is written."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        pack = home / "pack"
+        pack.mkdir(parents=True)
+        make_cur(pack / "mystery_one.cur")
+        make_cur(pack / "mystery_two.cur")
+
+        result = run(["import-win", str(pack), "--name", "NoArrow", "--sizes", "32"], home=home)
+        assert result["written"] is False, result
+        assert not (home / ".local/share/icons/NoArrow").exists()
+        assert len(result["files"]) == 2, result["files"]
+        for entry in result["files"]:
+            assert Path(entry["preview"]).is_file(), entry
+
+
+def test_map_rejects_an_escaping_path():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        pack = home / "pack"
+        pack.mkdir(parents=True)
+        make_cur(pack / "normal.cur")
+        secret = home / "secret.cur"
+        make_cur(secret)
+
+        run(["import-win", str(pack), "--name", "Escape", "--sizes", "32",
+            "--map", "arrow=../secret.cur"], home=home, expect_ok=False)
 
 
 # ------------------------------------------------------------ 3. build e2e

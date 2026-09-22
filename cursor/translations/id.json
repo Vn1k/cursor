@@ -18,6 +18,11 @@
   "hide_when_typing": "Sembunyikan saat mengetik",
   "import_hint": "Folder pack kursor Windows. Install.inf dipakai bila ada. Path .zip atau satu file .cur/.ani masih bisa diketik.",
   "import_path": "Folder pack kursor",
+  "map_roles": "Tetapkan kursor",
+  "map_pick": "Pilih file untuk",
+  "map_source_files": "File dalam pack ini — pilih peran di atas dulu",
+  "needs_arrow": "Kursor panah tidak ditemukan — tetapkan satu di bawah, lalu konversi lagi.",
+  "convert_again": "Konversi lagi",
   "install": "Pasang",
   "install_hint": "Folder berisi direktori cursors/. Path arsip masih bisa diketik. Pack Windows lewat tab Import.",
   "install_path": "Folder tema",
@@ -48,8 +53,7 @@
   "theme_name": "Nama tema (opsional)",
   "title": "Kursor",
   "unmapped": "Tidak dikenali",
-  "unmapped_hint": "Ganti nama file sesuai perannya, atau sertakan Install.inf, lalu konversi ulang.",
-  "leftovers": "File yang tidak bisa ditempatkan:",
+  "unmapped_hint": "Tetapkan lewat kisi di bawah, atau ganti nama file sesuai perannya lalu konversi ulang.",
   "settings": {
     "engine_path": {
       "label": "Path engine",
