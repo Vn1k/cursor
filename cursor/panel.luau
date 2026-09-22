@@ -361,16 +361,56 @@ local function sizeLabels()
   return labels
 end
 
--- The whole point of the plugin: one theme name written to five places. If a
--- layer drifted, say so rather than letting the cursor silently differ per app.
+-- pairs() order is not stable, and these lines would reshuffle on every render.
+local function sortedKeys(t)
+  local keys = {}
+  for key in pairs(t) do
+    table.insert(keys, key)
+  end
+  table.sort(keys)
+  return keys
+end
+
+-- The value most layers agree on. Deliberately not current.theme: that is the
+-- first compositor's value, so when the compositor is the one that drifted it
+-- would name every *other* layer as the odd one out.
+local function majorityTheme(layers)
+  local counts, best, bestCount = {}, "", 0
+  for _, value in pairs(layers) do
+    counts[value] = (counts[value] or 0) + 1
+    if counts[value] > bestCount then
+      best, bestCount = value, counts[value]
+    end
+  end
+  return best
+end
+
+-- The whole point of the plugin: one theme name written to every layer. If a
+-- layer drifted, name it - the engine already sends the per-layer values, and
+-- "something disagrees" sends the user to the terminal to find out which.
 local function driftWarning()
-  if current == nil or current.consistent or busy then
+  if current == nil or current.consistent or busy or current.layers == nil then
     return ui.box({ height = 0 })
   end
-  return ui.row({ gap = 8, align = "center" }, {
-    ui.glyph({ name = "alert-triangle", color = "tertiary", size = 16 }),
-    ui.label({ text = tr("drift"), fontSize = 12, color = "tertiary", flexGrow = 1 }),
-  })
+  local expected = majorityTheme(current.layers)
+  local rows = {
+    ui.row({ gap = 8, align = "center" }, {
+      ui.glyph({ name = "alert-triangle", color = "tertiary", size = 16 }),
+      ui.label({ text = tr("drift"), fontSize = 12, color = "tertiary", flexGrow = 1 }),
+    }),
+  }
+  -- Only the layers that disagree: this sits above the theme grid in a 640px
+  -- panel, so listing all of them would push the grid off the bottom.
+  for _, name in ipairs(sortedKeys(current.layers)) do
+    local value = current.layers[name]
+    if value ~= expected then
+      table.insert(rows, ui.label({
+        text = ("%s: %s"):format(name, value ~= "" and value or tr("not_set")),
+        fontSize = 11, color = "tertiary",
+      }))
+    end
+  end
+  return ui.column({ gap = 2, align = "stretch" }, rows)
 end
 
 local function themesTab()

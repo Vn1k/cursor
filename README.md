@@ -1,9 +1,9 @@
 # Cursor — a Noctalia plugin
 
-Changing your mouse cursor on Wayland is annoying: the setting lives in five
-different places, every app reads a different one, and you end up with a mix.
-This adds a panel to Noctalia that sets all five at once — and tells you when
-they have drifted apart.
+Changing your mouse cursor on Wayland is annoying: the setting lives in half a
+dozen different places, every app reads a different one, and you end up with a
+mix. This adds a panel to Noctalia that sets them all at once — and tells you
+which one drifted when they stop agreeing.
 
 It also turns Windows cursor packs (`.cur` / `.ani`, animations and all) into
 proper Linux themes, and can build a theme from your own PNGs.
@@ -13,28 +13,42 @@ proper Linux themes, and can build a theme from your own PNGs.
 When you pick a theme and press **Apply**, it writes the same name and size to
 every place something might read it from:
 
+**Your compositor's own pointer.** Each supported compositor gets its own file,
+and every one that has a config on your machine is written — not just the one
+you are running, so your cursor is still right after you switch:
+
+| Compositor | File it writes | Picks it up |
+| --- | --- | --- |
+| niri | `~/.config/niri/cursor.kdl` | right away (niri watches its config) |
+| Hyprland | `~/.config/hypr/cursor.conf` | right away (`hyprctl setcursor`) |
+| Sway | `~/.config/sway/cursor.conf` | right away (`swaymsg reload`) |
+| Mango | `~/.config/mango/cursor.conf` | right away (`mmsg dispatch reload_config`) |
+
+**Everything else**, written whatever you run:
+
 | Where | Reaches | Takes effect |
 | --- | --- | --- |
-| `~/.config/niri/cursor.kdl` | niri itself, X11 apps | right away |
 | `gsettings` | GTK4, libadwaita, file dialogs | right away |
 | `~/.config/gtk-{3,4}.0/settings.ini` | GTK apps | when the app restarts |
 | `~/.icons/default/index.theme` | Qt, SDL, Electron apps | when the app restarts |
 | `~/.config/environment.d/90-xcursor.conf` | everything started later | next login |
 
-It reads all five back too, and if they disagree the panel says so. That
-disagreement is the whole reason this exists.
+It reads every one of them back too, and if they disagree the panel names the
+layer that drifted. That disagreement is the whole reason this exists.
 
-**About your niri config.** It is edited exactly once, to add
-`include "cursor.kdl"`. Before touching it the plugin makes a backup and runs
-`niri validate`; if niri does not like the result, the backup is restored and
-nothing is left behind. After that first time only `cursor.kdl` changes.
+**About your compositor config.** It is edited exactly once, to add a single
+include line pointing at the file above. Before touching it the plugin makes a
+timestamped backup; where the compositor ships a config checker — `niri
+validate`, `sway -C` — that runs too, and if it rejects the result the backup is
+restored and nothing is left behind. After that first time only the included
+file changes, so your own config is never rewritten again.
 
 **Apps that are already open keep their old cursor.** That is how Wayland works,
 not a bug — restart the app, or log out and back in for everything at once.
 
-**On Hyprland, Sway and friends**, the four places that are not niri-specific
-still apply, so your apps do foll\ow along. The compositor's own cursor picks it
-up at the next login. Only niri is actually tested.
+**On any other compositor**, the four portable layers above still apply, so your
+apps follow along; the compositor's own pointer picks it up at the next login.
+Adding one is a small change — see [DEVELOPING.md](DEVELOPING.md).
 
 ## What you need
 
@@ -90,7 +104,19 @@ Click the tile in the control centre, or bind a key. For niri, put this in the
 Mod+Shift+M hotkey-overlay-title="Cursor" { spawn-sh "noctalia msg panel-toggle vn1k/cursor:manager"; }
 ```
 
-On another compositor, bind whatever key you like to:
+On Hyprland, in `~/.config/hypr/hyprland.conf`:
+
+```conf
+bind = SUPER SHIFT, M, exec, noctalia msg panel-toggle vn1k/cursor:manager
+```
+
+On Sway, in `~/.config/sway/config`:
+
+```
+bindsym $mod+Shift+m exec noctalia msg panel-toggle vn1k/cursor:manager
+```
+
+Anywhere else, bind whatever key you like to:
 
 ```sh
 noctalia msg panel-toggle vn1k/cursor:manager
@@ -159,10 +185,11 @@ missing. Everything else keeps working.
 **The cursor did not change in an app.** If it was already open, it keeps the
 cursor it started with. Restart it.
 
-**The panel says the layers disagree.** Something else on your system also sets
-a cursor — often a line in a shell profile or an old `XCURSOR_THEME` export.
-Pressing **Apply** again rewrites all five; if it comes back, that other thing
-is still overwriting one of them.
+**The panel says the layers disagree.** It lists the ones that drifted and what
+they hold, so you can see which is the odd one out. Something else on your
+system is also setting a cursor — often a line in a shell profile or an old
+`XCURSOR_THEME` export. Pressing **Apply** again rewrites every layer; if the
+same one comes back, that other thing is still overwriting it.
 
 **The Folder… button says zenity is missing.** Install `zenity`, or just type
 the path into the field above it.
