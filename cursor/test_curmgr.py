@@ -249,6 +249,26 @@ def test_import_maps_real_windows_scheme_names():
         assert (cursors / "up-arrow").exists(), sorted(p.name for p in cursors.iterdir())
 
 
+def test_dry_run_maps_without_writing():
+    """The panel scans before it converts, so a scan has to produce the whole
+    mapping grid and still leave the disk alone - otherwise the user is back to
+    converting twice, with a half-wrong theme installed in between."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        pack = home / "pack"
+        pack.mkdir(parents=True)
+        for stem in WINDOWS_SCHEME_NAMES:
+            make_cur(pack / f"{stem}.cur", size=32, hotspot=(1, 1))
+
+        result = run(["import-win", str(pack), "--name", "DryRun", "--dry-run",
+                      "--sizes", "32"], home=home)
+        assert result["written"] is False, result
+        assert "arrow" in result["mapped"], result["mapped"]
+        assert len(result["files"]) == len(WINDOWS_SCHEME_NAMES), result["files"]
+        assert result["role_previews"], result
+        assert not (home / ".local/share/icons/DryRun").exists(), "a dry run wrote a theme"
+
+
 def test_import_maps_abbreviated_and_misspelled_names():
     """A real pack's second shape: lowercase, brand-prefixed, 'alt' for
     alternate, 'unavaliable' misspelled, and only the second diagonal

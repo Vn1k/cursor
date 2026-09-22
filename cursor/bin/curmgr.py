@@ -505,7 +505,8 @@ def _source_dir(path: Path) -> tuple[Path, tempfile.TemporaryDirectory | None]:
 
 
 def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZES,
-                   filter_name="lanczos", overrides: dict[str, str] | None = None) -> dict:
+                   filter_name="lanczos", overrides: dict[str, str] | None = None,
+                   dry_run: bool = False) -> dict:
     from win2xcur.parser import open_blob
     from win2xcur.parser.inf import parse_inf
     from win2xcur.theme import WIN_CURSORS, XCURSOR_ALIASES
@@ -575,9 +576,13 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
         files = _render_sources(root, candidates)
         role_previews = _render_role_previews(role_frames)
 
-        # No arrow is not a hard failure: hand back the grid so the panel can
-        # ask the user to assign one, instead of erroring with nothing to act on.
-        if "arrow" not in role_frames:
+        # Two ways to stop before writing anything, one payload. A dry run is
+        # how the panel shows its mapping grid *before* the convert, so the
+        # user fixes a bad guess once instead of converting twice; no arrow is
+        # not a hard failure either, the grid is what the user needs to act on.
+        # Everything above this line ran exactly as a real convert would, so the
+        # grid is a promise the convert keeps.
+        if dry_run or "arrow" not in role_frames:
             return {
                 "ok": True, "written": False, "name": name, "method": method,
                 "inf_error": inf_error, "mapped": sorted(mapped),
@@ -921,6 +926,8 @@ def main(argv=None) -> int:
     p.add_argument("--map", dest="map_roles", action="append", default=[], metavar="ROLE=RELPATH",
                    help="assign a role to a source file (relative to the source folder); "
                         "ROLE= with nothing after the = un-maps that role; repeatable")
+    p.add_argument("--dry-run", action="store_true",
+                   help="map and render previews without writing a theme")
     p.add_argument("--shadow", action="store_true", help="emulate the Windows drop shadow")
     p.add_argument("--shadow-color", default="#000000")
     p.add_argument("--shadow-radius", type=float, default=0.1)
@@ -962,7 +969,8 @@ def main(argv=None) -> int:
                 overrides[role] = rel
             result = import_windows(
                 args.source, args.name, _shadow_opts(args),
-                tuple(int(s) for s in args.sizes.split(",")), args.filter_name, overrides)
+                tuple(int(s) for s in args.sizes.split(",")), args.filter_name, overrides,
+                args.dry_run)
         elif args.cmd == "build":
             result = build_from_pngs(
                 args.source, args.name,

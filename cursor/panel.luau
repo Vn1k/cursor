@@ -40,15 +40,18 @@ local pendingRemove = ""
 -- too - both tabs called the same reportView() off the same variable.
 local importReport = nil
 local buildReport = nil
--- Manual role mapping, built from the last import's `files`/`role_previews`.
--- `mapping` (role -> relpath) survives a re-convert so a fix sticks; the rest
--- is redrawn from each import's result.
+-- Manual role mapping, built from the last scan or import's `files`/
+-- `role_previews`. `mapping` (role -> relpath) survives a re-convert so a fix
+-- sticks; the rest is redrawn from each result.
 local mapping = {}
 local mapFiles = {}
 local mapRoles = {}
 local mapPreviews = {}
 -- The role tile the user clicked, waiting for a file tile to pair it with.
 local mapTarget = ""
+-- The import path the grid on screen belongs to. Empty, or different from the
+-- field, means nothing has been scanned yet and the button offers a scan.
+local mapScanned = ""
 -- Bumped on every import. The engine rewrites the same cache paths each run
 -- (import-roles/{role}.png, import-sources/{index}.png) and the host caches
 -- textures by path, so a tile would keep painting the previous run's art
@@ -517,7 +520,9 @@ local function reportView(rep, withGrid)
     table.insert(lines, ui.label({ text = `{tr("method")}: {rep.method}`,
                                    fontSize = 12, color = "on_surface_variant" }))
   end
-  if rep.written == false then
+  -- Keyed on the actual condition, not on `written`: a scan writes nothing by
+  -- design, so `written == false` no longer means the arrow is missing.
+  if rep.mapped ~= nil and table.find(rep.mapped, "arrow") == nil then
     table.insert(lines, ui.label({ text = tr("needs_arrow"), fontSize = 12, color = "tertiary" }))
   end
   if rep.mapped ~= nil and #rep.mapped > 0 then
@@ -539,6 +544,11 @@ local function reportView(rep, withGrid)
 end
 
 local function importTab()
+  -- Nothing scanned for the path in the field: read the pack and show the grid
+  -- first, so the convert that follows is the only one that writes a theme.
+  local needsScan = mapScanned ~= trim(importPath)
+  local label = needsScan and tr("scan")
+    or (next(mapping) ~= nil and tr("convert_again") or tr("convert"))
   return ui.column({ flexGrow = 1, gap = 12, align = "stretch" }, {
     ui.label({ text = tr("import_hint"), fontSize = 12, color = "on_surface_variant" }),
     ui.input({ key = `import_path_{pickSeq}`, placeholder = tr("import_path"), value = importPath,
@@ -555,9 +565,9 @@ local function importTab()
                   variant = importShadow and "primary" or "outline",
                   tooltip = tr("shadow_tooltip"), onClick = "onToggleShadow" }),
       ui.spacer({ flexGrow = 1 }),
-      ui.button({ key = "convert", text = next(mapping) ~= nil and tr("convert_again") or tr("convert"),
-                  variant = "primary",
-                  onClick = "onImport", enabled = not busy and trim(importPath) ~= "" }),
+      ui.button({ key = "convert", text = label, variant = "primary",
+                  onClick = needsScan and "onScanImport" or "onImport",
+                  enabled = not busy and trim(importPath) ~= "" }),
     }),
     ui.scroll({ flexGrow = 1, gap = 8 }, { reportView(importReport, true) }),
   })
@@ -701,6 +711,12 @@ function onOpen(_context)
     tab = "install"
   end)
   loadThemes()
+  -- Picking a folder is the whole intent, so read the pack straight away: the
+  -- user gets the mapping grid without a second click, and still decides when
+  -- anything is written.
+  if trim(importPath) ~= "" and mapScanned ~= trim(importPath) then
+    onScanImport()
+  end
 end
 
 function onPickImportDir()
@@ -830,6 +846,7 @@ function onImportPathChange(value)
   mapRoles = {}
   mapPreviews = {}
   mapTarget = ""
+  mapScanned = ""
   importReport = nil
 end
 
@@ -842,7 +859,11 @@ function onToggleShadow()
   render()
 end
 
-function onImport()
+-- A scan and a convert are the same run with the same mapping, differing only
+-- in whether the engine writes the theme at the end - so they share a body
+-- rather than drifting apart. `doImport` is local; the two globals below are
+-- what the buttons reference by name.
+local function doImport(dryRun)
   local source = trim(importPath)
   if source == "" or busy then
     return
@@ -851,9 +872,13 @@ function onImport()
     fail(tr("path_missing"))
     return
   end
+  -- Typing in the path field clears the grid without a re-render, so the button
+  -- can still read "Convert" for a pack nobody has scanned. Decide on the state,
+  -- not on the label: an unscanned path always scans first.
+  dryRun = dryRun or mapScanned ~= source
   busy = true
   importReport = nil
-  setStatus(tr("converting"))
+  setStatus(dryRun and tr("scanning") or tr("converting"))
   render()
 
   local args = `import-win {shellQuote(noctalia.expandPath(source))}{imageArgs()}`
@@ -862,6 +887,9 @@ function onImport()
   end
   if importShadow then
     args ..= " --shadow"
+  end
+  if dryRun then
+    args ..= " --dry-run"
   end
   for role, rel in pairs(mapping) do
     args ..= ` --map {shellQuote(`{role}={rel}`)}`
@@ -886,6 +914,7 @@ function onImport()
       table.insert(mapRoles, role)
     end
     mapTarget = ""
+    mapScanned = source
 
     -- The grid stays on screen either way, so the panel never switches tabs
     -- here; the themes list is only refreshed, not reloaded with its previews.
@@ -899,11 +928,21 @@ function onImport()
           render()
         end
       end)
-    else
+    elseif table.find(result.mapped or {}, "arrow") == nil then
       setStatus(tr("needs_arrow"), "tertiary")
+    else
+      setStatus(tr("map_roles"))
     end
     render()
   end)
+end
+
+function onScanImport()
+  doImport(true)
+end
+
+function onImport()
+  doImport(false)
 end
 
 function onBuildPathChange(value)
