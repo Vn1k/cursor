@@ -55,22 +55,46 @@ Image work (`wand`, `win2xcur`) is imported **lazily inside functions**, so
 `list`, `current` and `apply` still work on a box without ImageMagick. Keep those
 imports local; a top-level import would break the common path.
 
-### Applying: five layers, one name
+### Applying: four portable layers plus every compositor found
 
-`apply_theme()` fans one theme+size out to niri, gsettings, GTK 3/4 ini,
-`~/.icons/default/index.theme` and `environment.d`. `layers["niri"]["ok"]` gates
-the overall `ok` **only where a niri config exists** — off niri that layer can
-never succeed, so the four portable layers decide instead. The rest are
-best-effort and report their own reason.
-`read_current()` reads the same five back and sets `consistent`, which is the
+`apply_theme()` fans one theme+size out to gsettings, GTK 3/4 ini,
+`~/.icons/default/index.theme` and `environment.d`, plus one layer per entry in
+`COMPOSITORS` whose config file exists. All of the detected compositor layers
+must succeed for the overall `ok`; with none configured the four portable layers
+decide instead. The rest are best-effort and report their own reason.
+`read_current()` reads the same set back and sets `consistent`, which is the
 drift warning the panel shows; that disagreement is the bug this plugin exists to
-fix.
+fix. An **undetected compositor contributes no key at all** to `layers` — a key
+holding `""` would make `consistent` permanently false.
 
-`_apply_niri()` is the only one that edits a file it does not own. It backs up
-`config.kdl`, comments out a conflicting top-level `cursor` block, appends
-`include "cursor.kdl"`, runs `niri validate`, and restores the backup on
-rejection. After the first run only `cursor.kdl` is rewritten. `config.kdl`'s
+Every compositor with a config gets written, not just the running one: it keeps
+the theme right across a compositor switch, and the reload argv are best-effort,
+so the ones that are not running do nothing.
+
+`COMPOSITORS` is the whole of it — adding a compositor is adding a row, never a
+new write path. Each row names its config, the managed include file it owns, the
+line appended to the config, a `render` function, the regexes `read_current()`
+reads back with, an optional validator and the reload argv.
+
+`_apply_compositor()` is the only thing here that edits a file it does not own.
+It backs up the config, optionally comments out a conflicting block, writes the
+include file, appends the include line, validates, and restores the backup on
+rejection. After the first run only the include file is rewritten. The config's
 mtime is bumped because niri watches it, not the included file.
+
+- `comment_block` is **niri-only**: a second top-level `cursor` node is a KDL
+  collision, while Hyprland, Sway and Mango are last-wins parsers and the
+  include goes on the end, so ours simply overrides theirs.
+- For the same last-wins reason the non-niri renderers always write *both* hide
+  keys, including the off values. Omitting one would leave an earlier setting of
+  the user's standing after the panel turns the toggle off.
+- The panel's "hide after ms" is milliseconds because niri and Sway are;
+  Hyprland (`cursor:inactive_timeout`, capped at 20 upstream) and Mango
+  (`cursor_hide_timeout`) take seconds, so their renderers divide and
+  `ms_scale` multiplies back on the way out.
+- Hyprland and Mango have `validate: None`; see the `ponytail:` comments.
+  Hyprland also gets `hyprctl setcursor` in its reload argv, which is what moves
+  the pointer now rather than at next login.
 
 ### Building themes
 

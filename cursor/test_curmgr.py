@@ -597,15 +597,92 @@ def test_apply_comments_out_a_conflicting_cursor_block():
         assert proc.returncode == 0, proc.stderr[-500:]
 
 
-def test_apply_without_niri_still_ok():
-    """Hyprland, Sway and friends: no niri config, four portable layers."""
+def test_apply_without_a_compositor_still_ok():
+    """No compositor config at all: the four portable layers carry it."""
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
         result = run(["apply", "Adwaita", "--size", "32"], home=home)
-        assert not result["layers"]["niri"]["ok"], "niri layer should report it found no config"
+        assert "niri" not in result["layers"], "an undetected compositor must not be a layer"
         assert result["layers"]["gtk"]["ok"], result["layers"]["gtk"]
         assert result["layers"]["xdg_default"]["ok"], result["layers"]["xdg_default"]
         assert result["layers"]["environment"]["ok"], result["layers"]["environment"]
+
+        # With no compositor to disagree with, the remaining layers all say
+        # Adwaita - so the panel must not sit on a permanent drift warning.
+        state = run(["current"], home=home)
+        assert state["consistent"], state["layers"]
+
+
+# Each entry: config path, its minimal body, the include line we expect to be
+# appended, and substrings the generated cursor file must contain for
+# `--size 32 --hide-when-typing --hide-after-inactive-ms 3000`.
+COMPOSITOR_CASES = {
+    "hyprland": (
+        "hypr/hyprland.conf", "bind = SUPER, T, exec, foot\n", "hypr/cursor.conf",
+        "source = {cursor}",
+        ["env = XCURSOR_THEME,Adwaita", "env = XCURSOR_SIZE,32",
+         "hide_on_key_press = true", "inactive_timeout = 3"],
+    ),
+    "sway": (
+        "sway/config", "bindsym $mod+t exec foot\n", "sway/cursor.conf",
+        "include {cursor}",
+        ["seat * xcursor_theme Adwaita 32",
+         "seat * hide_cursor when-typing enable", "seat * hide_cursor 3000"],
+    ),
+    "mango": (
+        "mango/config.conf", "bind=SUPER,t,spawn,foot\n", "mango/cursor.conf",
+        "source={cursor}",
+        ["cursor_theme=Adwaita", "cursor_size=32",
+         "cursor_hide_on_keypress=1", "cursor_hide_timeout=3"],
+    ),
+}
+
+
+def check_compositor(name):
+    """Seed one compositor's config, apply, and check what landed."""
+    config_rel, body, cursor_rel, include, expected = COMPOSITOR_CASES[name]
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        config = home / ".config" / config_rel
+        cursor = home / ".config" / cursor_rel
+        config.parent.mkdir(parents=True)
+        config.write_text(body)
+        include = include.format(cursor=cursor)
+
+        result = run(["apply", "Adwaita", "--size", "32", "--hide-when-typing",
+                      "--hide-after-inactive-ms", "3000"], home=home)
+        assert result["layers"][name]["ok"], result["layers"][name]
+
+        written = cursor.read_text()
+        for line in expected:
+            assert line in written, (name, line, written)
+
+        text = config.read_text()
+        assert text.count(include) == 1, (name, text)
+        assert body.strip() in text, f"{name}: original config content was lost"
+        assert list(config.parent.glob(f"{config.name}.bak-cursor-*")), f"{name}: no backup"
+
+        # idempotent: no second include line, no stale size
+        run(["apply", "Adwaita", "--size", "24"], home=home)
+        assert config.read_text().count(include) == 1, config.read_text()
+        assert "32" not in cursor.read_text(), cursor.read_text()
+
+        state = run(["current"], home=home)
+        assert state["layers"][name] == "Adwaita", state["layers"]
+        assert state["size"] == 24, state
+        assert state["consistent"], state["layers"]
+
+
+def test_apply_hyprland():
+    check_compositor("hyprland")
+
+
+def test_apply_sway():
+    check_compositor("sway")
+
+
+def test_apply_mango():
+    check_compositor("mango")
 
 
 def test_apply_rejects_unknown_theme():

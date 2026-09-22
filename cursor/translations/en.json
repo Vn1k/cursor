@@ -12,7 +12,7 @@
   "confirm_remove": "Remove?",
   "convert": "Convert",
   "converting": "Converting…",
-  "drift": "Layers disagree — apply a theme to bring niri, GTK and Qt back in sync.",
+  "drift": "Layers disagree — apply a theme to bring your compositor, GTK and Qt back in sync.",
   "engine_missing": "The cursor engine did not run. Check that python3 is installed.",
   "error": "Something went wrong",
   "hide_after_ms": "Hide after ms",

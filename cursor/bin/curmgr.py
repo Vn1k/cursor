@@ -28,9 +28,6 @@ CACHE = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache")
 
 USER_ICONS = DATA / "icons"
 ICON_DIRS = [USER_ICONS, HOME / ".icons", Path("/usr/share/icons")]
-NIRI_DIR = CONFIG / "niri"
-NIRI_CONFIG = NIRI_DIR / "config.kdl"
-NIRI_CURSOR = NIRI_DIR / "cursor.kdl"
 ENV_CONF = CONFIG / "environment.d" / "90-xcursor.conf"
 PREVIEW_DIR = CACHE / "curmgr" / "preview"
 # Rendered source files from the last scan, so the panel's mapping grid can
@@ -47,7 +44,8 @@ BUILD_SOURCE_DIR = CACHE / "curmgr" / "build-sources"
 BUILD_ROLE_DIR = CACHE / "curmgr" / "build-roles"
 
 NOMINAL_SIZES = (24, 32, 48, 64, 96)
-MANAGED = "// Managed by the Noctalia cursor plugin - edits here are overwritten."
+MANAGED_TEXT = "Managed by the Noctalia cursor plugin - edits here are overwritten."
+MANAGED = f"// {MANAGED_TEXT}"
 
 # Slots shown in the preview strip, each with fallbacks across naming eras.
 PREVIEW_SLOTS = [
@@ -172,14 +170,17 @@ def _ini_value(path: Path, key: str) -> str:
 
 
 def read_current() -> dict:
-    kdl = NIRI_CURSOR.read_text(errors="replace") if NIRI_CURSOR.is_file() else ""
-    niri_theme = re.search(r'xcursor-theme\s+"([^"]*)"', kdl)
-    niri_size = re.search(r"xcursor-size\s+(\d+)", kdl)
     env = ENV_CONF.read_text(errors="replace") if ENV_CONF.is_file() else ""
     env_theme = re.search(r"^XCURSOR_THEME=(.*)$", env, re.M)
 
-    layers = {
-        "niri": niri_theme.group(1) if niri_theme else "",
+    layers = {}
+    first = None
+    for key, spec in detected_compositors().items():
+        state = _read_compositor(spec)
+        layers[key] = state["theme"]
+        if first is None:
+            first = state
+    layers |= {
         "gsettings": _gsettings("cursor-theme"),
         "gtk3": _ini_value(CONFIG / "gtk-3.0" / "settings.ini", "gtk-cursor-theme-name"),
         "gtk4": _ini_value(CONFIG / "gtk-4.0" / "settings.ini", "gtk-cursor-theme-name"),
@@ -189,12 +190,11 @@ def read_current() -> dict:
     present = [v for v in layers.values() if v]
     return {
         "ok": True,
-        "theme": layers["niri"] or layers["gsettings"],
-        "size": int(niri_size.group(1)) if niri_size else int(_gsettings("cursor-size") or 24),
-        "hide_when_typing": "hide-when-typing" in kdl,
-        "hide_after_inactive_ms": int(
-            (re.search(r"hide-after-inactive-ms\s+(\d+)", kdl) or [0, 0])[1]
-        ),
+        "theme": (first["theme"] if first else "") or layers["gsettings"],
+        "size": (first["size"] if first and first["size"] else 0)
+                or int(_gsettings("cursor-size") or 24),
+        "hide_when_typing": bool(first and first["hide_when_typing"]),
+        "hide_after_inactive_ms": first["hide_after_inactive_ms"] if first else 0,
         "layers": layers,
         # Layers that disagree are the exact bug this tool exists to fix.
         "consistent": len(set(present)) <= 1 and len(present) == len(layers),
@@ -209,18 +209,143 @@ def read_current() -> dict:
 # applying
 # --------------------------------------------------------------------------
 
-def _render_cursor_kdl(theme: str, size: int, hide_typing: bool, hide_ms: int,
-                       with_environment: bool) -> str:
+def _render_niri(theme: str, size: int, hide_typing: bool, hide_ms: int, text: str) -> str:
     lines = [MANAGED, "cursor {", f'    xcursor-theme "{theme}"', f"    xcursor-size {size}"]
     if hide_typing:
         lines.append("    hide-when-typing")
     if hide_ms > 0:
         lines.append(f"    hide-after-inactive-ms {hide_ms}")
     lines.append("}")
-    if with_environment:
+    # niri allows only one top-level `environment` node, so leave XCURSOR_* to
+    # environment.d when the user already owns that block.
+    if not re.search(r"^environment\s*\{", text, re.M):
         lines += ["environment {", f'    XCURSOR_THEME "{theme}"',
                   f'    XCURSOR_SIZE "{size}"', "}"]
     return "\n".join(lines) + "\n"
+
+
+def _render_hyprland(theme: str, size: int, hide_typing: bool, hide_ms: int, text: str) -> str:
+    # Hyprland has no cursor-theme option: the theme travels as XCURSOR_* env,
+    # and `hyprctl setcursor` (see the reload argv) is what moves the pointer
+    # now rather than at next login. Both hide keys are always written, because
+    # the parser is last-wins and an omitted key would leave an earlier one of
+    # the user's standing when the panel turns the toggle off.
+    return "\n".join([
+        f"# {MANAGED_TEXT}",
+        f"env = XCURSOR_THEME,{theme}",
+        f"env = XCURSOR_SIZE,{size}",
+        "cursor {",
+        f"    hide_on_key_press = {'true' if hide_typing else 'false'}",
+        # cursor:inactive_timeout is a float in seconds, capped at 20 upstream.
+        f"    inactive_timeout = {min(20, round(hide_ms / 1000))}",
+        "}",
+    ]) + "\n"
+
+
+def _render_sway(theme: str, size: int, hide_typing: bool, hide_ms: int, text: str) -> str:
+    # sway's hide_cursor takes milliseconds like niri, but rejects anything
+    # between 1 and 99; 0 is the documented "never hide".
+    idle = 0 if hide_ms <= 0 else max(100, hide_ms)
+    return "\n".join([
+        f"# {MANAGED_TEXT}",
+        f"seat * xcursor_theme {theme} {size}",
+        f"seat * hide_cursor when-typing {'enable' if hide_typing else 'disable'}",
+        f"seat * hide_cursor {idle}",
+    ]) + "\n"
+
+
+def _render_mango(theme: str, size: int, hide_typing: bool, hide_ms: int, text: str) -> str:
+    return "\n".join([
+        f"# {MANAGED_TEXT}",
+        f"cursor_theme={theme}",
+        f"cursor_size={size}",
+        f"cursor_hide_on_keypress={1 if hide_typing else 0}",
+        f"cursor_hide_timeout={round(hide_ms / 1000)}",
+    ]) + "\n"
+
+
+# One entry per compositor whose own cursor has to be set separately from the
+# four portable layers. Adding a compositor is adding a row here, not a new
+# write path: `_apply_compositor` and `_read_compositor` are the only code.
+COMPOSITORS = {
+    "niri": {
+        "config": CONFIG / "niri" / "config.kdl",
+        "include_file": CONFIG / "niri" / "cursor.kdl",
+        "include_line": 'include "cursor.kdl"',
+        "comment": "//",
+        "render": _render_niri,
+        # A second top-level `cursor` node is a KDL collision, not an override,
+        # so niri is the one compositor whose conflicting block must go. The
+        # other three are last-wins parsers and the include is appended last.
+        "comment_block": "cursor",
+        "validate": ["niri", "validate", "-c"],
+        "reload": [],  # niri watches config.kdl; the mtime bump below is enough
+        "theme_re": r'xcursor-theme\s+"([^"]*)"',
+        "size_re": r"xcursor-size\s+(\d+)",
+        "typing_re": r"hide-when-typing",
+        "ms_re": r"hide-after-inactive-ms\s+(\d+)",
+        "ms_scale": 1,
+    },
+    "hyprland": {
+        "config": CONFIG / "hypr" / "hyprland.conf",
+        "include_file": CONFIG / "hypr" / "cursor.conf",
+        "include_line": f"source = {CONFIG / 'hypr' / 'cursor.conf'}",
+        "comment": "#",
+        "render": _render_hyprland,
+        # ponytail: no validation. `Hyprland --verify-config` builds a whole
+        # compositor object, which is not something to run inside a live
+        # session; the only edit to a file we do not own is one appended
+        # `source =` line, and the backup covers it. Wire it up if upstream
+        # ever ships a parse-only check.
+        "validate": None,
+        "reload": [["hyprctl", "reload"], ["hyprctl", "setcursor", "{theme}", "{size}"]],
+        "theme_re": r"^env\s*=\s*XCURSOR_THEME,(.*)$",
+        "size_re": r"^env\s*=\s*XCURSOR_SIZE,(\d+)$",
+        "typing_re": r"hide_on_key_press\s*=\s*true",
+        "ms_re": r"inactive_timeout\s*=\s*(\d+)",
+        "ms_scale": 1000,
+    },
+    "sway": {
+        "config": CONFIG / "sway" / "config",
+        "include_file": CONFIG / "sway" / "cursor.conf",
+        "include_line": f"include {CONFIG / 'sway' / 'cursor.conf'}",
+        "comment": "#",
+        "render": _render_sway,
+        "validate": ["sway", "-C", "-c"],
+        "reload": [["swaymsg", "reload"]],
+        "theme_re": r"^seat\s+\S+\s+xcursor_theme\s+(\S+)",
+        "size_re": r"^seat\s+\S+\s+xcursor_theme\s+\S+\s+(\d+)",
+        "typing_re": r"hide_cursor\s+when-typing\s+enable",
+        "ms_re": r"hide_cursor\s+(\d+)",
+        "ms_scale": 1,
+    },
+    "mango": {
+        "config": CONFIG / "mango" / "config.conf",
+        "include_file": CONFIG / "mango" / "cursor.conf",
+        "include_line": f"source={CONFIG / 'mango' / 'cursor.conf'}",
+        "comment": "#",
+        "render": _render_mango,
+        # ponytail: `mango -c FILE -p` is documented as a parse check but would
+        # need mango installed to be worth trusting; same reasoning as Hyprland.
+        "validate": None,
+        "reload": [["mmsg", "dispatch", "reload_config"]],
+        "theme_re": r"^cursor_theme=(.*)$",
+        "size_re": r"^cursor_size=(\d+)$",
+        "typing_re": r"^cursor_hide_on_keypress=[1-9]",
+        "ms_re": r"^cursor_hide_timeout=(\d+)$",
+        "ms_scale": 1000,
+    },
+}
+
+
+def detected_compositors() -> dict:
+    """Every compositor with a config on this box, not just the running one.
+
+    Writing all of them is what keeps the theme right after a compositor
+    switch; the reload commands are best-effort, so the ones that are not
+    running simply do nothing.
+    """
+    return {k: s for k, s in COMPOSITORS.items() if s["config"].is_file()}
 
 
 def _backup(path: Path) -> Path:
@@ -229,48 +354,77 @@ def _backup(path: Path) -> Path:
     return dest
 
 
-def _apply_niri(theme: str, size: int, hide_typing: bool, hide_ms: int) -> dict:
-    if not NIRI_CONFIG.is_file():
-        return {"ok": False, "reason": f"no niri config at {NIRI_CONFIG}"}
+def _read_compositor(spec: dict) -> dict:
+    text = (spec["include_file"].read_text(errors="replace")
+            if spec["include_file"].is_file() else "")
+    theme = re.search(spec["theme_re"], text, re.M)
+    size = re.search(spec["size_re"], text, re.M)
+    ms = re.search(spec["ms_re"], text, re.M)
+    return {
+        "theme": theme.group(1).strip() if theme else "",
+        "size": int(size.group(1)) if size else 0,
+        "hide_when_typing": bool(re.search(spec["typing_re"], text, re.M)),
+        "hide_after_inactive_ms": int(ms.group(1)) * spec["ms_scale"] if ms else 0,
+    }
 
-    text = NIRI_CONFIG.read_text()
+
+def _apply_compositor(name: str, spec: dict, theme: str, size: int,
+                      hide_typing: bool, hide_ms: int) -> dict:
+    config, include_file = spec["config"], spec["include_file"]
+    if not config.is_file():
+        return {"ok": False, "reason": f"no {name} config at {config}"}
+
+    text = config.read_text()
     backup = None
     notes = []
 
-    # A top-level `cursor` block in the user's own config would collide with
-    # ours; comment it out once instead of maintaining two write paths.
-    if re.search(r"^cursor\s*\{", text, re.M):
-        backup = _backup(NIRI_CONFIG)
-        text = _comment_out_block(text, "cursor")
-        notes.append("commented out the pre-existing top-level cursor block")
+    block = spec.get("comment_block")
+    if block and re.search(rf"^{block}\s*\{{", text, re.M):
+        backup = _backup(config)
+        text = _comment_out_block(text, block)
+        notes.append(f"commented out the pre-existing top-level {block} block")
 
-    has_env = bool(re.search(r"^environment\s*\{", text, re.M))
-    if has_env:
-        notes.append("kept your existing environment block; XCURSOR_* left to environment.d")
+    include_file.write_text(spec["render"](theme, size, hide_typing, hide_ms, text))
 
-    NIRI_CURSOR.write_text(_render_cursor_kdl(theme, size, hide_typing, hide_ms, not has_env))
-
-    if not re.search(r'^\s*include\s+"cursor\.kdl"', text, re.M):
+    if not re.search(rf"^\s*{re.escape(spec['include_line'])}\s*$", text, re.M):
         if backup is None:
-            backup = _backup(NIRI_CONFIG)
-        text = text.rstrip("\n") + f'\n\n{MANAGED}\ninclude "cursor.kdl"\n'
-        notes.append("added include \"cursor.kdl\"")
+            backup = _backup(config)
+        text = text.rstrip("\n") + f"\n\n{spec['comment']} {MANAGED_TEXT}\n{spec['include_line']}\n"
+        notes.append(f"added {spec['include_line']}")
 
-    if text != NIRI_CONFIG.read_text():
-        NIRI_CONFIG.write_text(text)
+    if text != config.read_text():
+        config.write_text(text)
 
-    ok, err = _niri_validate(NIRI_CONFIG)
+    ok, err = _validate(spec["validate"], config)
     if not ok:
         if backup is not None:
-            shutil.copy2(backup, NIRI_CONFIG)
-        NIRI_CURSOR.unlink(missing_ok=True)
-        return {"ok": False, "reason": f"niri rejected the config, rolled back: {err}"}
+            shutil.copy2(backup, config)
+        include_file.unlink(missing_ok=True)
+        return {"ok": False, "reason": f"{name} rejected the config, rolled back: {err}"}
 
-    # niri watches config.kdl; bump its mtime so an included-file edit still
-    # triggers a live reload.
-    os.utime(NIRI_CONFIG, None)
-    return {"ok": True, "file": str(NIRI_CURSOR), "backup": str(backup) if backup else None,
+    # niri watches config.kdl, so an edit to the included file alone would not
+    # reload; bumping the mtime is a no-op everywhere else.
+    os.utime(config, None)
+    notes += _reload(spec, theme, size)
+    return {"ok": True, "file": str(include_file), "backup": str(backup) if backup else None,
             "notes": notes}
+
+
+def _reload(spec: dict, theme: str, size: int) -> list[str]:
+    """Ask a running compositor to pick the change up. Never fatal."""
+    notes = []
+    for argv in spec["reload"]:
+        argv = [a.format(theme=theme, size=size) for a in argv]
+        if not shutil.which(argv[0]):
+            continue
+        try:
+            proc = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError) as exc:
+            notes.append(f"{argv[0]}: {exc}")
+            continue
+        if proc.returncode != 0:
+            notes.append(f"{' '.join(argv)}: {(proc.stderr or proc.stdout).strip()[-200:]}")
+    return notes
 
 
 def _comment_out_block(text: str, node: str) -> str:
@@ -291,12 +445,11 @@ def _comment_out_block(text: str, node: str) -> str:
     return "\n".join(out) + "\n"
 
 
-def _niri_validate(path: Path) -> tuple[bool, str]:
-    if not shutil.which("niri"):
+def _validate(argv: list[str] | None, path: Path) -> tuple[bool, str]:
+    if not argv or not shutil.which(argv[0]):
         return True, ""
     try:
-        proc = subprocess.run(["niri", "validate", "-c", str(path)],
-                              capture_output=True, text=True, timeout=30)
+        proc = subprocess.run([*argv, str(path)], capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as exc:
         return True, str(exc)  # cannot validate is not the same as invalid
     return proc.returncode == 0, (proc.stderr or proc.stdout).strip()[-400:]
@@ -352,17 +505,20 @@ def _apply_environment(theme: str, size: int) -> dict:
 
 def apply_theme(theme: str, size: int, hide_typing: bool, hide_ms: int) -> dict:
     find_theme(theme)  # fail fast on a typo before touching any config
-    layers = {
-        "niri": _apply_niri(theme, size, hide_typing, hide_ms),
+    detected = detected_compositors()
+    layers = {name: _apply_compositor(name, spec, theme, size, hide_typing, hide_ms)
+              for name, spec in detected.items()}
+    layers |= {
         "gsettings": _apply_gsettings(theme, size),
         "gtk": _apply_gtk(theme, size),
         "xdg_default": _apply_xdg_default(theme),
         "environment": _apply_environment(theme, size),
     }
-    # Off niri the niri layer can never succeed, but the four portable layers
-    # still change the cursor, so gate on niri only where a niri config exists.
-    ok = (layers["niri"]["ok"] if NIRI_CONFIG.is_file()
-          else any(layer["ok"] for name, layer in layers.items() if name != "niri"))
+    # Under a supported compositor its own cursor is the one the user sees on
+    # the desktop, so every detected one has to land. With none configured the
+    # four portable layers still change the cursor and decide on their own.
+    ok = (all(layers[name]["ok"] for name in detected) if detected
+          else any(layer["ok"] for layer in layers.values()))
     return {"ok": ok, "theme": theme, "size": size, "layers": layers}
 
 
