@@ -62,6 +62,11 @@ local maps = { import = newMapState("import"), build = newMapState("build") }
 -- ui.input only reads `value` when it mounts, so a path chosen by the picker
 -- needs a new key to land in the field at all.
 local pickSeq = 0
+-- The role names are win2xcur's, not English: `size_nwse` says nothing about
+-- which corner it drags. Every role tile carries its description as a tooltip,
+-- and this toggles the same strings as a visible list - hover alone is not a
+-- thing anyone discovers. One flag for both grids: it is the same list.
+local mapHelp = false
 
 local render
 local loadThemes
@@ -417,6 +422,7 @@ local function assign(st, role, rel)
 end
 
 local function mapRoleTile(st, role, byRel)
+  local tip = tr(`role_{role}`)
   local isArmed = st.target == role
   local override = st.mapping[role]
   local border = isArmed and "primary" or (override ~= nil and "tertiary" or "outline")
@@ -435,19 +441,24 @@ local function mapRoleTile(st, role, byRel)
     end
     render()
   end
+  -- Tooltip on frame *and* label: the host ignores a prop a node type does not
+  -- know, and an empty role - the one most in need of explaining - is a box,
+  -- not an image.
   local frame
   if preview ~= nil then
     frame = ui.image({ key = `role_img_{st.tab}_{role}_{st.serial}_{override or "auto"}`,
                        width = MAP_TILE, height = MAP_TILE, path = preview, fit = "contain",
-                       radius = 8, border = border, borderWidth = isArmed and 3 or 1, onClick = onClick })
+                       radius = 8, border = border, borderWidth = isArmed and 3 or 1,
+                       tooltip = tip, onClick = onClick })
   else
     frame = ui.box({ width = MAP_TILE, height = MAP_TILE, fill = "surface_variant",
-                     radius = 8, border = border, borderWidth = isArmed and 3 or 1, onClick = onClick })
+                     radius = 8, border = border, borderWidth = isArmed and 3 or 1,
+                     tooltip = tip, onClick = onClick })
   end
   local tile = ui.column({ key = `role_{st.tab}_{role}`, gap = 2, align = "center", width = 60 }, {
     frame,
     ui.label({ text = role, fontSize = 10, maxLines = 1, maxWidth = 60,
-               textAlign = "center", color = "on_surface_variant" }),
+               textAlign = "center", color = "on_surface_variant", tooltip = tip }),
   })
   -- Every role is a drop target: dragging a file tile onto it assigns it,
   -- the same as arming the role then clicking the file. The drag type carries
@@ -481,6 +492,20 @@ local function mapFileTile(st, file)
   }, { tile })
 end
 
+-- Built from st.roles, not a list of its own, so it stays in the grid's order
+-- and never names a role this grid does not show.
+local function roleLegend(st)
+  local rows = {}
+  for _, role in ipairs(st.roles) do
+    table.insert(rows, ui.row({ gap = 8, align = "baseline" }, {
+      ui.label({ text = role, fontSize = 11, minWidth = 90, color = "on_surface" }),
+      ui.label({ text = tr(`role_{role}`), fontSize = 11, flexGrow = 1,
+                 color = "on_surface_variant" }),
+    }))
+  end
+  return ui.column({ gap = 2, align = "stretch" }, rows)
+end
+
 -- Always shown after a scan, even when every role mapped: any tile can be
 -- reassigned, not only the empty ones. Click a role, then a file, to assign.
 local function mappingGrid(st)
@@ -502,7 +527,17 @@ local function mappingGrid(st)
     table.insert(fileTiles, mapFileTile(st, file))
   end
   return ui.column({ gap = 8, align = "stretch" }, {
-    ui.label({ text = tr("map_roles"), fontSize = 12, color = "on_surface_variant" }),
+    ui.row({ gap = 6, align = "center" }, {
+      ui.label({ text = tr("map_roles"), fontSize = 12, color = "on_surface_variant" }),
+      ui.button({ key = `map_help_{st.tab}`, glyph = "help-circle", variant = "ghost",
+                  controlSize = "sm", tooltip = tr("role_legend"),
+                  onClick = function()
+                    mapHelp = not mapHelp
+                    render()
+                  end }),
+    }),
+    -- ui.box, not ui.spacer: a spacer with no height eats the column's slack.
+    mapHelp and roleLegend(st) or ui.box({ height = 0 }),
     wrapTiles(roleTiles, MAP_COLUMNS),
     ui.label({
       text = st.target ~= "" and `{tr("map_pick")} {st.target}` or tr("map_source_files"),
