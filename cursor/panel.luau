@@ -49,6 +49,11 @@ local mapRoles = {}
 local mapPreviews = {}
 -- The role tile the user clicked, waiting for a file tile to pair it with.
 local mapTarget = ""
+-- Bumped on every import. The engine rewrites the same cache paths each run
+-- (import-roles/{role}.png, import-sources/{index}.png) and the host caches
+-- textures by path, so a tile would keep painting the previous run's art
+-- unless its image node changes key. Same trick screen-toolkit uses.
+local mapSerial = 0
 -- ui.input only reads `value` when it mounts, so a path chosen by the picker
 -- needs a new key to land in the field at all.
 local pickSeq = 0
@@ -406,11 +411,15 @@ local function assign(role, rel)
   render()
 end
 
-local function mapRoleTile(role)
+local function mapRoleTile(role, byRel)
   local isArmed = mapTarget == role
-  local hasOverride = mapping[role] ~= nil
-  local preview = mapPreviews[role]
-  local border = isArmed and "primary" or (hasOverride and "tertiary" or "outline")
+  local override = mapping[role]
+  local border = isArmed and "primary" or (override ~= nil and "tertiary" or "outline")
+  -- An override is a pending intent: the engine only re-renders role previews
+  -- on the next convert, so show the assigned file's own thumbnail meanwhile.
+  -- Without this the tile keeps last convert's art (or stays empty) until the
+  -- user converts again, which makes a drop look like it did nothing.
+  local preview = override ~= nil and byRel[override] or mapPreviews[role]
   local onClick = function()
     if mapTarget == role then
       -- second click on an armed role clears any override, back to the guess
@@ -423,7 +432,8 @@ local function mapRoleTile(role)
   end
   local frame
   if preview ~= nil then
-    frame = ui.image({ width = MAP_TILE, height = MAP_TILE, path = preview, fit = "contain",
+    frame = ui.image({ key = `role_img_{role}_{mapSerial}_{override or "auto"}`,
+                       width = MAP_TILE, height = MAP_TILE, path = preview, fit = "contain",
                        radius = 8, border = border, borderWidth = isArmed and 3 or 1, onClick = onClick })
   else
     frame = ui.box({ width = MAP_TILE, height = MAP_TILE, fill = "surface_variant",
@@ -451,7 +461,8 @@ local function mapFileTile(file)
     assign(mapTarget, file.rel)
   end
   local tile = ui.column({ key = `file_{file.rel}`, gap = 2, align = "center", width = 60 }, {
-    ui.image({ width = MAP_TILE, height = MAP_TILE, path = file.preview, fit = "contain",
+    ui.image({ key = `file_img_{file.rel}_{mapSerial}`,
+               width = MAP_TILE, height = MAP_TILE, path = file.preview, fit = "contain",
                radius = 8, border = "outline", borderWidth = 1, onClick = onClick }),
     ui.label({ text = file.file, fontSize = 10, maxLines = 1, maxWidth = 60,
                textAlign = "center", color = "on_surface_variant" }),
@@ -470,9 +481,15 @@ local function mappingGrid()
   if #mapRoles == 0 then
     return ui.box({ height = 0 })
   end
+  -- rel -> thumbnail, so a role tile can paint the file assigned to it before
+  -- the engine has re-rendered anything.
+  local byRel = {}
+  for _, file in ipairs(mapFiles) do
+    byRel[file.rel] = file.preview
+  end
   local roleTiles = {}
   for _, role in ipairs(mapRoles) do
-    table.insert(roleTiles, mapRoleTile(role))
+    table.insert(roleTiles, mapRoleTile(role, byRel))
   end
   local fileTiles = {}
   for _, file in ipairs(mapFiles) do
@@ -859,6 +876,8 @@ function onImport()
     importReport = result
     mapFiles = result.files or {}
     mapPreviews = result.role_previews or {}
+    -- Fresh art at the same cache paths: re-key every tile image (see mapSerial).
+    mapSerial += 1
     mapRoles = {}
     for _, role in ipairs(result.mapped or {}) do
       table.insert(mapRoles, role)
