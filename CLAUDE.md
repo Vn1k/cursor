@@ -133,7 +133,14 @@ list".
 - A filename equal to a role name short-circuits with score 4, above any hint.
   That is what makes the panel's "rename those files after their role" advice
   true — without it `up_arrow.cur` goes to `arrow`, since `arrow` is a token
-  inside the name. Do not let a new hint outrank it.
+  inside the name. Do not let a new hint outrank it. A filename equal to one of
+  the role's own Xcursor names in `XCURSOR_NAMES` (`left_ptr`, `xterm`,
+  `sb_h_double_arrow`…) scores 4 the same way. Never feed it win2xcur's
+  `XCURSOR_ALIASES`: those point `copy`, `top_left_corner` and dozens more at
+  the arrow as fallbacks.
+- `build`'s heuristic groups numbered frames by base name (`wait-01.png` →
+  `wait`) and globs each base exactly, so `left_ptr*` never swallows
+  `left_ptr_watch-*`.
 - `location` and `person` are roles win2xcur knows and Xcursor has no name for,
   so they get no hints and are filtered out of `unmapped_roles`: asking a user
   to rename a file for them would be asking for the impossible.

@@ -827,6 +827,41 @@ def _png_pack(home: Path) -> Path:
     return src
 
 
+def test_build_maps_xcursor_named_pngs():
+    """A PNG dump of an existing theme (Bibata's, here in miniature) is named the
+    Xcursor way. Sorted order used to decide: bd_double_arrow became the arrow,
+    wait-01*.png kept one frame, and left_ptr* would swallow left_ptr_watch-*."""
+    from win2xcur.parser import open_blob
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        src = home / "src"
+        src.mkdir()
+        for stem in ("bd_double_arrow", "copy", "top_left_corner", "context-menu",
+                     "xterm", "sb_h_double_arrow"):
+            make_png(src / f"{stem}.png")  # blue decoys
+        make_png(src / "left_ptr.png", colour="#e5a50a")  # the only yellow one
+        for n in (1, 2, 3):
+            make_png(src / f"left_ptr_watch-{n:02d}.png", colour="#33d17a")
+            make_png(src / f"wait-{n:02d}.png", colour="#e01b24")
+
+        result = run(["build", str(src), "--name", "XNamed", "--sizes", "24"], home=home)
+        cursors = home / ".local/share/icons/XNamed/cursors"
+
+        def source_of(name):
+            return (cursors / name).resolve().name, len(open_blob((cursors / name).read_bytes()).frames)
+
+        assert source_of("left_ptr") == ("default", 1), source_of("left_ptr")
+        assert source_of("left_ptr_watch") == ("progress", 3), source_of("left_ptr_watch")
+        assert source_of("watch") == ("wait", 3), source_of("watch")
+        for role in ("arrow", "text", "size_ew", "size_nwse", "working", "wait"):
+            assert role in result["mapped"], (role, result["mapped"])
+        # the arrow is left_ptr.png's yellow, not a blue decoy that sorted first
+        image = open_blob((cursors / "default").read_bytes()).frames[0].images[0].image
+        r, g, b, a = max(zip(*[iter(bytes(image.export_pixels(channel_map="RGBA")))] * 4),
+                         key=lambda px: px[3])
+        assert r > b, ("arrow is not left_ptr.png", (r, g, b, a))
+
+
 def test_build_dry_run_maps_without_writing():
     """Build scans before it writes, like import-win: the grid has to come back
     whole and the disk has to stay untouched."""

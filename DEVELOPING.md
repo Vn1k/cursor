@@ -151,4 +151,30 @@ Covers the `.cur`→Xcursor geometry round trip, the premultiplied-alpha invaria
 alias symlink resolution, all five apply layers, the non-niri fallback, `niri
 validate` acceptance, and apply idempotency.
 
+### Other compositors, one at a time
+
+`apply` writes every compositor whose config exists, so running it against your
+real `$HOME` also edits `~/.config/niri/config.kdl`. Test the others in a sandbox:
+
+- **Files only, no compositor needed:** `test_apply_hyprland`, `test_apply_sway`
+  and `test_apply_mango` check the include file, the include line, the backup,
+  idempotency and read-back.
+- **Live compositors, automated:** `dev/e2e.sh [sway|hyprland|mango]` runs each
+  real compositor in its own rootless podman container. Nothing gets installed
+  on the host, and the host `~/.config` is never mounted. Each container starts
+  from a one-keybind config, runs `apply` a few times, then asks the running
+  compositor what it did. sway and mango run headless: a wlr virtual pointer
+  plus `grim -c` (`dev/cursor_probe.py`) checks the drawn cursor's size, theme
+  and hide timeout. Hyprland gets no output in a container (GBM), so it is
+  checked over `hyprctl getoption` / `configerrors` instead. mango is built
+  from pinned source, so its first image takes a few minutes. Set
+  `IMPORT_PACK=<.cur folder>` and/or `BUILD_PACK=<png folder>` and those get
+  mounted read-only, turned into themes by `import-win`/`build`, and applied too.
+- **By eye:** `dev/nested.sh hyprland|sway|mango` runs that compositor
+  nested in a window with a throwaway `$HOME` seeded with just its own config,
+  and opens a terminal inside it. There, `$CURMGR apply Adwaita --size 48` then
+  hover the window; `$CURMGR current` should say `consistent`. The reload
+  commands reach the nested instance only. Only `/usr/share/icons` themes are
+  visible; copy one in with `cp -a $REAL_HOME/.local/share/icons/X $HOME/.local/share/icons/`.
+
 Developed and verified on Fedora 43 (x86_64), niri 26.04, Noctalia v5.0.0.

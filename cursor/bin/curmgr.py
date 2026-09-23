@@ -11,6 +11,7 @@ applying themes keep working on a box where ImageMagick is missing.
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import re
@@ -77,13 +78,40 @@ ROLE_HINTS = {
     # "diagonalresize" unnumbered: some packs number only the second one. It is
     # a substring of "diagonalresize2", so the longest-hint tie-break below is
     # what keeps the numbered sibling on its own role.
-    "size_nwse": ["nwse", "dgn1", "diag1", "fdiag", "diagonalresize", "diagonalresize1"],
-    "size_nesw": ["nesw", "dgn2", "diag2", "bdiag", "diagonalresize2"],
+    "size_nwse": ["nwse", "dgn1", "diag1", "diagonal1", "fdiag", "diagonalresize",
+                  "diagonalresize1"],
+    "size_nesw": ["nesw", "dgn2", "diag2", "diagonal2", "bdiag", "diagonalresize2"],
     "move": ["move", "fleur", "sizeall", "pan"],
     "up_arrow": ["up", "uparrow", "alternate", "alternative", "alt"],
     "link": ["link", "hand"],
     # No "location"/"person": win2xcur has the roles but Xcursor has no name to
     # write them under, so a hint would report a mapping that produces nothing.
+}
+
+# Xcursor's own names, for sources already named the Linux way - a PNG dump of
+# an existing theme is left_ptr.png, xterm.png, sb_h_double_arrow.png. A whole
+# filename equal to one is as certain as a file named after its role. Only each
+# role's own names: win2xcur's XCURSOR_ALIASES also points dozens of unrelated
+# names (copy, top_left_corner, zoom-in...) at the arrow as a fallback, and
+# taking those as matches would hand the arrow to copy.png. "pointer" and
+# "circle" stay out for the same reason they are not hints: a Windows pack's
+# "Pointer.cur" is its arrow, and some themes draw "circle" as a plain ring.
+XCURSOR_NAMES = {
+    "arrow": ["left_ptr", "default", "top_left_arrow"],
+    "help": ["question_arrow", "left_ptr_help", "whats_this"],
+    "working": ["left_ptr_watch", "progress", "half-busy"],
+    "wait": ["watch"],
+    "crosshair": ["crosshair", "cross"],
+    "text": ["xterm", "ibeam"],
+    "pen": ["pencil"],
+    "unavailable": ["crossed_circle", "not-allowed", "forbidden"],
+    "size_ns": ["sb_v_double_arrow", "v_double_arrow", "ns-resize", "size_ver"],
+    "size_ew": ["sb_h_double_arrow", "h_double_arrow", "ew-resize", "size_hor"],
+    "size_nwse": ["bd_double_arrow", "nwse-resize", "size_fdiag"],
+    "size_nesw": ["fd_double_arrow", "nesw-resize", "size_bdiag"],
+    "move": ["fleur", "size_all", "all-scroll"],
+    "up_arrow": ["sb_up_arrow", "up-arrow"],
+    "link": ["hand2", "pointing_hand"],
 }
 
 
@@ -329,8 +357,10 @@ COMPOSITORS = {
         "include_line": "source={file}",
         "comment": "#",
         "render": _render_mango,
-        # ponytail: `mango -c FILE -p` is documented as a parse check but would
-        # need mango installed to be worth trusting; same reasoning as Hyprland.
+        # ponytail: no validation. `mango -p -c FILE` is documented as a parse
+        # check but exits 0 on unknown keys and bad binds alike (checked against
+        # mango git, Sep 2026), so it would pass anything. Wire it up once it
+        # returns non-zero on errors.
         "validate": None,
         "reload": [["mmsg", "dispatch", "reload_config"]],
         "theme_re": r"^cursor_theme=(.*)$",
@@ -630,7 +660,7 @@ def _guess_role(stem: str) -> tuple[str, int] | tuple[None, int]:
     # without it up_arrow.cur loses to `arrow`, whose hint is a whole token
     # inside the name - costing the user the pointer they were fixing.
     for role in ROLE_HINTS:
-        if squashed == re.sub(r"[^a-z0-9]", "", role):
+        if squashed == re.sub(r"[^a-z0-9]", "", role) or stem.lower() in XCURSOR_NAMES[role]:
             return role, 4
     tokens = set(re.split(r"[^a-z0-9]+", stem.lower())) - {""}
     best, score, hint_len = None, 0, 0
@@ -921,11 +951,24 @@ def build_from_pngs(source: Path, name: str, sizes=NOMINAL_SIZES,
     method = "spec.json" if entries else "heuristic"
     if not entries:
         # No spec: filename stem is the role, hotspot guessed from the role.
-        entries = {}
+        # Numbered frames (wait-01.png, wait-02.png) are one animated cursor,
+        # guessed by their base name. The glob is exact per base, so left_ptr
+        # never swallows left_ptr_watch-*, and each role goes to its best
+        # score, plainest name first - the same tie-break import-win uses.
+        bases: dict[str, bool] = {}
         for png in sorted(source.glob("*.png")):
-            role, score = _guess_role(png.stem)
-            if role and score >= 2:
-                entries.setdefault(role, {"png": f"{png.stem}*.png"})
+            base = re.sub(r"[-_]\d+$", "", png.stem)
+            bases[base] = bases.get(base, False) or base != png.stem
+        scored: dict[str, tuple[tuple[int, int], str]] = {}
+        for base, animated in bases.items():
+            role, score = _guess_role(base)
+            if not role or score < 2:
+                continue
+            key = (score, -len(re.split(r"[^a-z0-9]+", base.strip().lower())))
+            if role not in scored or key > scored[role][0]:
+                pattern = glob.escape(base) + ("[-_][0-9]*.png" if animated else ".png")
+                scored[role] = (key, pattern)
+        entries = {role: {"png": pattern} for role, (_, pattern) in scored.items()}
 
     role_frames, report = {}, {}
     for role, entry in entries.items():
