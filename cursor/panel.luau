@@ -110,6 +110,13 @@ local function imageArgs()
     .. ` --filter {shellQuote(configString("scale_filter", "lanczos"))}`
 end
 
+-- runAsync's default is 5s, and Noctalia kills the process when it runs out. An
+-- animated Windows pack at five sizes takes about that long, so it got killed
+-- halfway. 60s is the maximum runAsync allows.
+-- ponytail: a pack slower than 60s still times out; runStream has no limit if
+-- one ever does.
+local ENGINE_TIMEOUT_MS = 60000
+
 -- Every subcommand answers with one JSON object, so a decode failure means the
 -- engine itself is missing or broken rather than the request being invalid.
 local function call(args, done)
@@ -118,8 +125,12 @@ local function call(args, done)
     return
   end
   noctalia.runAsync(`{engine()} {args}`, function(result)
-    if result == nil or result.timedOut then
+    if result == nil then
       done(nil, tr("engine_missing"))
+      return
+    end
+    if result.timedOut then
+      done(nil, tr("engine_timeout"))
       return
     end
     local decoded = noctalia.json.decode(result.stdout or "")
@@ -133,7 +144,7 @@ local function call(args, done)
       return
     end
     done(decoded, nil)
-  end)
+  end, ENGINE_TIMEOUT_MS)
 end
 
 local function setStatus(text, tone)

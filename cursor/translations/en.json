@@ -15,6 +15,7 @@
   "drift": "Layers disagree — apply a theme to bring your compositor, GTK and Qt back in sync.",
   "not_set": "not set",
   "engine_missing": "The cursor engine did not run. Check that python3 is installed.",
+  "engine_timeout": "The cursor engine took longer than a minute and was stopped. Try fewer sizes in the plugin settings, then run it again.",
   "error": "Something went wrong",
   "hide_after_ms": "Hide after ms",
   "hide_when_typing": "Hide when typing",

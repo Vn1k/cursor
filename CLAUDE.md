@@ -106,6 +106,10 @@ produce `{role: frames}` and hand it to the single sink `write_theme()`, which
 resizes, writes the canonical cursor and symlinks its aliases. Add a new source
 format by producing that dict, not by writing cursor files.
 
+`write_theme()` builds into a hidden `.<name>.partial` beside the final
+directory and renames it into place only once complete; `list_themes()` skips
+dot-entries. A run killed halfway therefore leaves nothing in the theme list.
+
 `install_theme()` is deliberately **not** part of that pipeline: a finished
 Xcursor theme is copied verbatim, never re-encoded. Its `copytree(...,
 symlinks=True)` is load-bearing — roughly half of a real theme's `cursors/`
@@ -150,7 +154,10 @@ list".
 Module-level globals hold all state; `render()` rebuilds the whole tree and every
 handler calls it. Handlers are **global functions referenced by name string**
 (`onClick = "onApply"`), so they must stay global. `call()` wraps every engine
-invocation and is the single place errors turn into `fail()`. Panel state
+invocation and is the single place errors turn into `fail()`. It passes
+runAsync's maximum timeout (60s): the default is 5s, Noctalia kills the process
+when it runs out, and an animated Windows pack at five sizes takes about that
+long. A timeout reports `engine_timeout`, not `engine_missing`. Panel state
 survives a close, which is why `loadThemes()` clears `current` first.
 
 User-visible strings go through `noctalia.tr(key)` — add new keys to

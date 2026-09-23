@@ -136,6 +136,9 @@ def list_themes() -> list[dict]:
         if not root.is_dir():
             continue
         for entry in sorted(root.iterdir()):
+            # Hidden entries are write_theme()'s staging leftovers, never themes.
+            if entry.name.startswith("."):
+                continue
             cursors = entry / "cursors"
             if entry.name in themes or not cursors.is_dir():
                 continue
@@ -611,13 +614,22 @@ def write_theme(name: str, role_frames: dict, inherits: str = "Adwaita",
     # so checking here covers any future source format too.
     name = _safe_theme_name(name)
     root = USER_ICONS / name
+    # Built beside the final directory and swapped in only once complete. A run
+    # killed halfway (the panel's runAsync timeout, say) used to leave a
+    # half-written theme that still showed up in the list; the hidden name keeps
+    # a leftover out of list_themes(), and the next build clears it.
+    staging = USER_ICONS / f".{name}.partial"
+    retired = USER_ICONS / f".{name}.old"
     USER_ICONS.mkdir(parents=True, exist_ok=True)
     # Belt and braces, as in install_theme: catches a symlink planted in
     # USER_ICONS itself, which a name check cannot see.
-    if not _is_under(root, USER_ICONS):
-        raise Fail(f"refusing to write outside {USER_ICONS}: {root}")
-    cursors = root / "cursors"
-    cursors.mkdir(parents=True, exist_ok=True)
+    for path in (root, staging, retired):
+        if not _is_under(path, USER_ICONS):
+            raise Fail(f"refusing to write outside {USER_ICONS}: {path}")
+    for path in (staging, retired):
+        _remove_path(path)
+    cursors = staging / "cursors"
+    cursors.mkdir(parents=True)
 
     written = []
     for role, frames in role_frames.items():
@@ -636,12 +648,25 @@ def write_theme(name: str, role_frames: dict, inherits: str = "Adwaita",
                 link.unlink()
             link.symlink_to(canonical)
 
-    (root / "index.theme").write_text(
+    (staging / "index.theme").write_text(
         f"[Icon Theme]\nName={name}\nComment=Built by the Noctalia cursor plugin\n"
         f"Inherits={inherits}\n"
     )
-    (root / "cursor.theme").write_text(f"[Icon Theme]\nName={name}\nInherits={name}\n")
+    (staging / "cursor.theme").write_text(f"[Icon Theme]\nName={name}\nInherits={name}\n")
+
+    # Two renames, so the old theme is only deleted once the new one is in place.
+    if root.exists() or root.is_symlink():
+        root.rename(retired)
+    staging.rename(root)
+    _remove_path(retired)
     return {"path": str(root), "cursors": written}
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
 
 
 # --------------------------------------------------------------------------

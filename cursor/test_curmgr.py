@@ -432,6 +432,31 @@ def test_single_cursor_file_is_rejected():
             assert "folder" in result["error"], result
 
 
+def test_interrupted_write_never_shows_as_a_theme():
+    """The panel's runAsync timeout used to kill an import halfway and leave a
+    theme without index.theme and without its last role that still showed up in
+    the list. Themes are now built in a hidden .partial dir and swapped in whole."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        icons = home / ".local/share/icons"
+        stale = icons / ".Swapped.partial" / "cursors"
+        stale.mkdir(parents=True)
+        (stale / "default").write_bytes(b"half-written")
+        names = [t["name"] for t in run(["list"], home=home)["themes"]]
+        assert not any(n.startswith(".") for n in names), names
+
+        pack = home / "pack"
+        pack.mkdir()
+        make_cur(pack / "Normal.cur")
+        make_cur(pack / "Link.cur")
+        for _ in range(2):  # the second run replaces a complete theme
+            run(["import-win", str(pack), "--name", "Swapped", "--sizes", "24"], home=home)
+            assert (icons / "Swapped/index.theme").is_file()
+            assert (icons / "Swapped/cursors/hand2").exists()
+            leftovers = [p.name for p in icons.iterdir() if p.name.startswith(".")]
+            assert not leftovers, leftovers
+
+
 def test_map_overrides_a_guess():
     """--map wins over whatever the heuristic picked, inf or no inf."""
     from win2xcur.parser import open_blob
