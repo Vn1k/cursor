@@ -666,7 +666,7 @@ def _source_dir(path: Path) -> tuple[Path, tempfile.TemporaryDirectory | None]:
         shutil.unpack_archive(str(path), tmp.name, **extra)
         return Path(tmp.name), tmp
     if path.suffix.lower() in {".cur", ".ani"}:
-        return path.parent, None
+        raise Fail("a single cursor file is not a pack - pick the folder that holds it")
     raise Fail(f"unsupported import source: {path}")
 
 
@@ -818,8 +818,6 @@ def _safe_theme_name(name: str) -> str:
 
 def install_theme(source: Path, name: str = "") -> dict:
     """Copy a finished Xcursor theme into ~/.local/share/icons."""
-    if source.is_file() and source.suffix.lower() in {".cur", ".ani"}:
-        raise Fail("that is a single Windows cursor, not a theme - use import-win")
     if not source.exists():
         raise Fail(f"no such path: {source}")
 
@@ -1173,7 +1171,7 @@ def main(argv=None) -> int:
     p.add_argument("--hide-after-inactive-ms", type=int, default=0)
 
     p = sub.add_parser("import-win", help="convert a Windows cursor pack into a theme")
-    p.add_argument("source", type=Path, help="folder, archive, or .cur/.ani file")
+    p.add_argument("source", type=Path, help="folder or archive")
     p.add_argument("--name", default="")
     _add_mapping_args(p)
     p.add_argument("--shadow", action="store_true", help="emulate the Windows drop shadow")

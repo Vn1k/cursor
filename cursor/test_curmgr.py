@@ -419,6 +419,16 @@ def test_import_from_zip():
         assert (home / ".local/share/icons/Zipped/cursors/left_ptr").is_symlink()
 
 
+def test_single_cursor_file_is_rejected():
+    # It used to import the file's whole parent folder instead of the file.
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        make_cur(home / "My Cursor.cur")
+        for cmd in ("import-win", "install"):
+            result = run([cmd, str(home / "My Cursor.cur")], home=home, expect_ok=False)
+            assert "folder" in result["error"], result
+
+
 def test_map_overrides_a_guess():
     """--map wins over whatever the heuristic picked, inf or no inf."""
     from win2xcur.parser import open_blob
