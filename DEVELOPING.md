@@ -64,15 +64,16 @@ curmgr current                                # what each layer says right now
 curmgr preview Adwaita                        # render a preview strip -> PNG path
 curmgr apply Bibata-Modern-Ice --size 32      # write all five layers
 curmgr install ~/Downloads/Miku-Cursor        # finished Xcursor theme -> installed
-curmgr import-win ~/Downloads/pack.zip        # Windows pack -> Xcursor theme
+curmgr import-win ~/Downloads/MyPack         # Windows pack -> Xcursor theme
 curmgr build ~/art/mycursor --name MyCursor   # your PNGs -> Xcursor theme
 curmgr remove MyCursor                        # only ever from ~/.local/share/icons
 ```
 
 `apply` also takes `--hide-when-typing` and `--hide-after-inactive-ms N`.
 `import-win` and `build` take `--sizes`, `--filter` and `--name`; `import-win`
-also takes `--shadow`. Unlike the panel, the CLI accepts a `.zip` or `.tar.*`
-wherever it accepts a folder.
+also takes `--shadow`. Like the panel, every source is a folder: archives are
+refused, not unpacked, because tarfile on Python 3.11 cannot stop a crafted
+`.tar` from writing outside the extraction directory.
 
 ## Applying
 
@@ -118,7 +119,7 @@ Three things that look like bugs and are not:
 ### Installing a finished theme
 
 The theme's own `Name=` becomes the directory name (`Name=Miku Cursor` gives
-`Miku-Cursor`); `--name` overrides it. Archives holding several variants install
+`Miku-Cursor`); `--name` overrides it. A folder holding several variants installs
 all of them. A source that turns out to be a Windows pack is rejected with a
 pointer to `import-win` rather than a confusing failure — which is what happens
 if you aim this at a repo shipping both.
@@ -147,7 +148,7 @@ the `run()` helper, which also forces `GSETTINGS_BACKEND=memory`, so the live
 session is never touched — keep any new test on that helper.
 
 Covers the `.cur`→Xcursor geometry round trip, the premultiplied-alpha invariant,
-`.inf` and heuristic pack imports, animated `.ani`, zip archives, PNG builds,
+`.inf` and heuristic pack imports, animated `.ani`, archive refusal, PNG builds,
 alias symlink resolution, all five apply layers, the non-niri fallback, `niri
 validate` acceptance, and apply idempotency.
 

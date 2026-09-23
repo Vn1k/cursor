@@ -6,8 +6,8 @@
 [[plugin]]
 id = "vn1k/cursor"
 name = "Cursor"
-version = "1.0.0"
-updated_at = 1789995111
+version = "1.0.1"
+updated_at = 1790167290
 added_at = 1789971395
 author = "Vn1k"
 license = "MIT"

@@ -1,6 +1,6 @@
 id = "vn1k/cursor"
 name = "Cursor"
-version = "1.0.0"
+version = "1.0.1"
 plugin_api = 8
 author = "Vn1k"
 license = "MIT"

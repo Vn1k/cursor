@@ -405,18 +405,21 @@ def test_import_animated_ani():
         assert (cursors / "watch").is_symlink()
 
 
-def test_import_from_zip():
+def test_archives_are_rejected():
+    """Folders only: tarfile on Python 3.11 has no 'data' filter, so extracting
+    a crafted .tar could write outside the temp dir. Nothing may be unpacked."""
     import shutil
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
         pack = home / "src" / "MyPack"
         pack.mkdir(parents=True)
         make_cur(pack / "Normal.cur")
-        make_cur(pack / "Text.cur")
-        archive = shutil.make_archive(str(home / "pack"), "zip", str(home / "src"))
-        result = run(["import-win", archive, "--name", "Zipped", "--sizes", "32"], home=home)
-        assert "arrow" in result["mapped"]
-        assert (home / ".local/share/icons/Zipped/cursors/left_ptr").is_symlink()
+        make_theme(home / "src" / "Theme", name="Theme")
+        for cmd, fmt in (("import-win", "zip"), ("install", "gztar")):
+            archive = shutil.make_archive(str(home / f"pack-{fmt}"), fmt, str(home / "src"))
+            result = run([cmd, archive], home=home, expect_ok=False)
+            assert "extract" in result["error"], (cmd, result)
+        assert not (home / ".local/share/icons").exists(), "an archive was unpacked"
 
 
 def test_single_cursor_file_is_rejected():
@@ -758,13 +761,11 @@ def test_install_from_folder_keeps_symlinks():
         assert "Demo-Theme" in names, names
 
 
-def test_install_from_archive_nested():
-    import shutil
+def test_install_finds_a_nested_theme():
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
         make_theme(home / "src" / "pack" / "Nested", name="Nested")
-        archive = shutil.make_archive(str(home / "pack"), "gztar", str(home / "src"))
-        run(["install", archive], home=home)
+        run(["install", str(home / "src")], home=home)
         assert (home / ".local/share/icons/Nested/cursors/default").is_symlink()
 
 

@@ -172,8 +172,8 @@ local function startDir(current)
   return noctalia.expandPath("~/Downloads") .. "/"
 end
 
--- Every tab takes a folder: extract an archive first. The engine still accepts
--- one, so a .zip or .tar.* path typed into the field keeps working.
+-- Every tab takes a folder: extract an archive first. The engine refuses
+-- archives outright rather than unpacking them.
 local function pick(field, current)
   if not noctalia.commandExists("zenity") then
     fail(tr("picker_missing"))

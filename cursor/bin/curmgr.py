@@ -18,7 +18,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -679,22 +678,15 @@ def _guess_role(stem: str) -> tuple[str, int] | tuple[None, int]:
     return best, score
 
 
-def _source_dir(path: Path) -> tuple[Path, tempfile.TemporaryDirectory | None]:
+def _source_dir(path: Path) -> Path:
+    # Folders only. Archives were extracted here once, but tarfile on Python
+    # 3.11 has no 'data' filter, so a crafted .tar could write outside the
+    # extraction directory. The panel already asks for a folder; the engine
+    # now agrees, and that whole class of bug is gone rather than patched.
     if path.is_dir():
-        return path, None
-    if path.suffix.lower() in {".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz"}:
-        tmp = tempfile.TemporaryDirectory(prefix="curmgr-")
-        # A tar entry named ../.. escapes the extraction directory unless the
-        # 'data' filter is on: 3.14 defaults to it, 3.12 and 3.13 need asking.
-        # zipfile sanitises member paths itself and rejects the keyword, so this
-        # is tar-only.
-        # ponytail: 3.11 has no filter argument at all and stays trusting. Drop
-        # the version check once 3.11 is not worth supporting.
-        extra = {}
-        if path.suffix.lower() != ".zip" and sys.version_info >= (3, 12):
-            extra["filter"] = "data"
-        shutil.unpack_archive(str(path), tmp.name, **extra)
-        return Path(tmp.name), tmp
+        return path
+    if path.suffix.lower() in {".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar"}:
+        raise Fail("that is an archive - extract it first and pick the folder")
     if path.suffix.lower() in {".cur", ".ani"}:
         raise Fail("a single cursor file is not a pack - pick the folder that holds it")
     raise Fail(f"unsupported import source: {path}")
@@ -707,100 +699,96 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
     from win2xcur.parser.inf import parse_inf
     from win2xcur.theme import WIN_CURSORS, XCURSOR_ALIASES
 
-    root, tmp = _source_dir(source)
-    try:
-        candidates = sorted(p for p in root.rglob("*") if p.suffix.lower() in {".cur", ".ani"})
-        if not candidates:
-            raise Fail(f"no .cur or .ani files found under {root}")
+    root = _source_dir(source)
+    candidates = sorted(p for p in root.rglob("*") if p.suffix.lower() in {".cur", ".ani"})
+    if not candidates:
+        raise Fail(f"no .cur or .ani files found under {root}")
 
-        role_frames: dict = {}
-        method = "heuristic"
-        inf_error = ""
+    role_frames: dict = {}
+    method = "heuristic"
+    inf_error = ""
 
-        for inf in sorted(root.rglob("*.inf")):
-            try:
-                parsed = parse_inf(inf)
-            except (ValueError, OSError) as exc:
-                inf_error = f"{inf.name}: {exc}"
+    for inf in sorted(root.rglob("*.inf")):
+        try:
+            parsed = parse_inf(inf)
+        except (ValueError, OSError) as exc:
+            inf_error = f"{inf.name}: {exc}"
+            continue
+        for role in WIN_CURSORS:
+            cursor = getattr(parsed, role, None)
+            if cursor is not None:
+                role_frames[role] = cursor.frames
+        if role_frames:
+            method = f"inf:{inf.name}"
+            name = name or parsed.name
+            break
+
+    if not role_frames:
+        # Packs ship near-duplicates - "Normal Select" beside "My Melody
+        # Normal Select", "Busy" beside "Busy 2" - which score the same.
+        # Break the tie on the plainest name rather than on where a space
+        # happens to sort, which handed the arrow to "Alternate Select".
+        scored: dict[str, tuple[tuple[int, int], Path]] = {}
+        for path in candidates:
+            role, score = _guess_role(path.stem)
+            if not role:
                 continue
-            for role in WIN_CURSORS:
-                cursor = getattr(parsed, role, None)
-                if cursor is not None:
-                    role_frames[role] = cursor.frames
-            if role_frames:
-                method = f"inf:{inf.name}"
-                name = name or parsed.name
-                break
-
-        if not role_frames:
-            # Packs ship near-duplicates - "Normal Select" beside "My Melody
-            # Normal Select", "Busy" beside "Busy 2" - which score the same.
-            # Break the tie on the plainest name rather than on where a space
-            # happens to sort, which handed the arrow to "Alternate Select".
-            scored: dict[str, tuple[tuple[int, int], Path]] = {}
-            for path in candidates:
-                role, score = _guess_role(path.stem)
-                if not role:
-                    continue
-                key = (score, -len(re.split(r"[^a-z0-9]+", path.stem.strip().lower())))
-                if key > scored.get(role, ((0, -99), None))[0]:
-                    scored[role] = (key, path)
-            for role, (_, path) in scored.items():
-                role_frames[role] = open_blob(path.read_bytes()).frames
-
-        # The panel's mapping grid: a user-picked file wins over both the .inf
-        # and the heuristic guess, and an empty value un-maps a role the
-        # heuristic got wrong rather than leaving no way to blank it.
-        for role, rel in (overrides or {}).items():
-            if role not in WIN_CURSORS or role not in XCURSOR_ALIASES:
-                raise Fail(f"not a mappable role: {role}")
-            if rel == "":
-                role_frames.pop(role, None)
-                continue
-            path = (root / rel).resolve()
-            if not _is_under(path, root):
-                raise Fail(f"refusing to read outside {root}: {rel}")
-            if not path.is_file():
-                raise Fail(f"mapped file not found: {rel}")
+            key = (score, -len(re.split(r"[^a-z0-9]+", path.stem.strip().lower())))
+            if key > scored.get(role, ((0, -99), None))[0]:
+                scored[role] = (key, path)
+        for role, (_, path) in scored.items():
             role_frames[role] = open_blob(path.read_bytes()).frames
 
-        mapped = set(role_frames)
-        used = {p.name for p in candidates}
-        # Only roles the user could actually fill by mapping a file: location
-        # and person have no Xcursor name to be written under.
-        unmapped = [r for r in WIN_CURSORS if r not in mapped and r in XCURSOR_ALIASES]
-        files = _render_sources(root, candidates, IMPORT_SOURCE_DIR)
-        role_previews = _render_role_previews(role_frames, IMPORT_ROLE_DIR)
+    # The panel's mapping grid: a user-picked file wins over both the .inf
+    # and the heuristic guess, and an empty value un-maps a role the
+    # heuristic got wrong rather than leaving no way to blank it.
+    for role, rel in (overrides or {}).items():
+        if role not in WIN_CURSORS or role not in XCURSOR_ALIASES:
+            raise Fail(f"not a mappable role: {role}")
+        if rel == "":
+            role_frames.pop(role, None)
+            continue
+        path = (root / rel).resolve()
+        if not _is_under(path, root):
+            raise Fail(f"refusing to read outside {root}: {rel}")
+        if not path.is_file():
+            raise Fail(f"mapped file not found: {rel}")
+        role_frames[role] = open_blob(path.read_bytes()).frames
 
-        # Two ways to stop before writing anything, one payload. A dry run is
-        # how the panel shows its mapping grid *before* the convert, so the
-        # user fixes a bad guess once instead of converting twice; no arrow is
-        # not a hard failure either, the grid is what the user needs to act on.
-        # Everything above this line ran exactly as a real convert would, so the
-        # grid is a promise the convert keeps.
-        if dry_run or "arrow" not in role_frames:
-            return {
-                "ok": True, "written": False, "name": name, "method": method,
-                "inf_error": inf_error, "mapped": sorted(mapped),
-                "unmapped_roles": unmapped, "files": files, "role_previews": role_previews,
-                "source_files": sorted(used),
-            }
+    mapped = set(role_frames)
+    used = {p.name for p in candidates}
+    # Only roles the user could actually fill by mapping a file: location
+    # and person have no Xcursor name to be written under.
+    unmapped = [r for r in WIN_CURSORS if r not in mapped and r in XCURSOR_ALIASES]
+    files = _render_sources(root, candidates, IMPORT_SOURCE_DIR)
+    role_previews = _render_role_previews(role_frames, IMPORT_ROLE_DIR)
 
-        result = write_theme(name, role_frames, sizes=sizes, filter_name=filter_name,
-                             shadow_opts=shadow_opts)
-
+    # Two ways to stop before writing anything, one payload. A dry run is
+    # how the panel shows its mapping grid *before* the convert, so the
+    # user fixes a bad guess once instead of converting twice; no arrow is
+    # not a hard failure either, the grid is what the user needs to act on.
+    # Everything above this line ran exactly as a real convert would, so the
+    # grid is a promise the convert keeps.
+    if dry_run or "arrow" not in role_frames:
         return {
-            "ok": True, "written": True, "name": name, "method": method, "inf_error": inf_error,
-            "mapped": sorted(mapped),
-            "unmapped_roles": unmapped,
-            "files": files,
-            "role_previews": role_previews,
+            "ok": True, "written": False, "name": name, "method": method,
+            "inf_error": inf_error, "mapped": sorted(mapped),
+            "unmapped_roles": unmapped, "files": files, "role_previews": role_previews,
             "source_files": sorted(used),
-            **result,
         }
-    finally:
-        if tmp is not None:
-            tmp.cleanup()
+
+    result = write_theme(name, role_frames, sizes=sizes, filter_name=filter_name,
+                         shadow_opts=shadow_opts)
+
+    return {
+        "ok": True, "written": True, "name": name, "method": method, "inf_error": inf_error,
+        "mapped": sorted(mapped),
+        "unmapped_roles": unmapped,
+        "files": files,
+        "role_previews": role_previews,
+        "source_files": sorted(used),
+        **result,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -851,45 +839,41 @@ def install_theme(source: Path, name: str = "") -> dict:
     if not source.exists():
         raise Fail(f"no such path: {source}")
 
-    root, tmp = _source_dir(source)
-    try:
-        # Pointing straight at a theme's cursors/ directory means the parent.
-        if root.name == "cursors" and _is_theme_root(root.parent):
-            roots = [root.parent]
-        else:
-            roots = _find_theme_roots(root)
+    root = _source_dir(source)
+    # Pointing straight at a theme's cursors/ directory means the parent.
+    if root.name == "cursors" and _is_theme_root(root.parent):
+        roots = [root.parent]
+    else:
+        roots = _find_theme_roots(root)
 
-        if not roots:
-            if any(p.suffix.lower() in {".cur", ".ani"} for p in root.rglob("*")):
-                raise Fail("this looks like a Windows cursor pack - use import-win instead")
-            raise Fail(f"no Xcursor theme found under {source}: nothing has a cursors/ directory")
-        if name and len(roots) > 1:
-            raise Fail(f"--name needs exactly one theme, but {len(roots)} were found")
+    if not roots:
+        if any(p.suffix.lower() in {".cur", ".ani"} for p in root.rglob("*")):
+            raise Fail("this looks like a Windows cursor pack - use import-win instead")
+        raise Fail(f"no Xcursor theme found under {source}: nothing has a cursors/ directory")
+    if name and len(roots) > 1:
+        raise Fail(f"--name needs exactly one theme, but {len(roots)} were found")
 
-        installed, replaced = [], []
-        for theme_root in roots:
-            dest_name = _safe_theme_name(name or _theme_dir_name(theme_root))
-            dest = USER_ICONS / dest_name
-            # Belt and braces: the name is sanitised above, this catches symlink
-            # games in USER_ICONS itself before anything is deleted.
-            USER_ICONS.mkdir(parents=True, exist_ok=True)
-            if not _is_under(dest.parent / dest.name, USER_ICONS):
-                raise Fail(f"refusing to write outside {USER_ICONS}: {dest}")
-            if dest.exists() or dest.is_symlink():
-                if not _is_under(dest, USER_ICONS):
-                    raise Fail(f"refusing to replace a theme outside {USER_ICONS}: {dest}")
-                shutil.rmtree(dest) if dest.is_dir() and not dest.is_symlink() else dest.unlink()
-                replaced.append(dest_name)
-            # symlinks=True is load-bearing: a real theme is roughly half alias
-            # symlinks, and dereferencing them bloats it and loses the aliasing.
-            shutil.copytree(theme_root, dest, symlinks=True)
-            installed.append(dest_name)
+    installed, replaced = [], []
+    for theme_root in roots:
+        dest_name = _safe_theme_name(name or _theme_dir_name(theme_root))
+        dest = USER_ICONS / dest_name
+        # Belt and braces: the name is sanitised above, this catches symlink
+        # games in USER_ICONS itself before anything is deleted.
+        USER_ICONS.mkdir(parents=True, exist_ok=True)
+        if not _is_under(dest.parent / dest.name, USER_ICONS):
+            raise Fail(f"refusing to write outside {USER_ICONS}: {dest}")
+        if dest.exists() or dest.is_symlink():
+            if not _is_under(dest, USER_ICONS):
+                raise Fail(f"refusing to replace a theme outside {USER_ICONS}: {dest}")
+            shutil.rmtree(dest) if dest.is_dir() and not dest.is_symlink() else dest.unlink()
+            replaced.append(dest_name)
+        # symlinks=True is load-bearing: a real theme is roughly half alias
+        # symlinks, and dereferencing them bloats it and loses the aliasing.
+        shutil.copytree(theme_root, dest, symlinks=True)
+        installed.append(dest_name)
 
-        return {"ok": True, "installed": installed, "replaced": replaced,
-                "path": str(USER_ICONS)}
-    finally:
-        if tmp is not None:
-            tmp.cleanup()
+    return {"ok": True, "installed": installed, "replaced": replaced,
+            "path": str(USER_ICONS)}
 
 
 # --------------------------------------------------------------------------
@@ -1214,7 +1198,7 @@ def main(argv=None) -> int:
     p.add_argument("--hide-after-inactive-ms", type=int, default=0)
 
     p = sub.add_parser("import-win", help="convert a Windows cursor pack into a theme")
-    p.add_argument("source", type=Path, help="folder or archive")
+    p.add_argument("source", type=Path, help="folder")
     p.add_argument("--name", default="")
     _add_mapping_args(p)
     p.add_argument("--shadow", action="store_true", help="emulate the Windows drop shadow")
@@ -1231,8 +1215,8 @@ def main(argv=None) -> int:
     _add_mapping_args(p)
     _add_image_args(p)
 
-    p = sub.add_parser("install", help="install a finished Xcursor theme (folder or archive)")
-    p.add_argument("source", type=Path, help="folder or archive holding a cursors/ directory")
+    p = sub.add_parser("install", help="install a finished Xcursor theme from a folder")
+    p.add_argument("source", type=Path, help="folder holding a cursors/ directory")
     p.add_argument("--name", default="", help="install under this name instead of the theme's own")
 
     p = sub.add_parser("remove", help="delete a theme you built (never a system one)")
