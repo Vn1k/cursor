@@ -6,7 +6,7 @@ author = "Vn1k"
 license = "MIT"
 icon = "pointer"
 description = "Pick, import and build cursor themes, then apply them everywhere at once."
-tags = ["panel", "shortcut", "theming", "utility", "niri", "hyprland", "sway", "mangowm"]
+tags = ["panel", "shortcut", "theming", "utility", "niri", "hyprland", "sway", "mangowc"]
 
 # bin/curmgr.py owns every cursor file and every config write; this plugin runs
 # it and draws the JSON it prints, so nothing here needs to know a binary

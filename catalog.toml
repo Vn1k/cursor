@@ -15,4 +15,4 @@ icon = "pointer"
 description = "Pick, import and build cursor themes, then apply them everywhere at once."
 deprecated = false
 plugin_api = 8
-tags = ["panel", "shortcut", "theming", "utility", "niri", "hyprland", "sway", "mangowm"]
+tags = ["panel", "shortcut", "theming", "utility", "niri", "hyprland", "sway", "mangowc"]

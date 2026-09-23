@@ -153,10 +153,11 @@ handler calls it. Handlers are **global functions referenced by name string**
 invocation and is the single place errors turn into `fail()`. Panel state
 survives a close, which is why `loadThemes()` clears `current` first.
 
-User-visible strings go through `noctalia.tr(key)` — add new keys to **both**
-`translations/en.json` and `translations/id.json`, including `settings.*.label` /
-`.description` keys for anything added to `plugin.toml`. Those dotted manifest
-keys stay dotted in `plugin.toml` and nested in the JSON.
+User-visible strings go through `noctalia.tr(key)` — add new keys to
+`translations/en.json`, including `settings.*.label` / `.description` keys for
+anything added to `plugin.toml`. Those dotted manifest keys stay dotted in
+`plugin.toml` and nested in the JSON. English only: the community-plugins repo
+takes other locales from Noctalia Translate, never hand-written files.
 
 `engine()` runs `bin/curmgr.py` out of `noctalia.pluginDir()`, so nothing has to
 be on `PATH`; the `engine_path` setting is only an override. `icon` and
