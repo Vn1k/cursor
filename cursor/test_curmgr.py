@@ -564,6 +564,27 @@ def test_no_gsettings_is_not_drift():
         assert state["theme"] == "Adwaita", state
 
 
+def test_preview_rerenders_after_a_reinstall_from_older_files():
+    """The strip cache compared mtimes, which install's copytree keeps, so a
+    same-name reinstall from older files kept the old strip. A dangling alias
+    symlink also crashed the whole preview."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        src = make_theme(home / "src" / "T", name="T")
+        run(["install", str(src)], home=home)
+        first = run(["preview", "T"], home=home)
+        assert run(["preview", "T"], home=home)["cached"] is True
+
+        again = make_theme(home / "src2" / "T", name="T")
+        for f in (again / "cursors").iterdir():
+            os.utime(f, (946684800, 946684800), follow_symlinks=False)  # year 2000
+        (again / "cursors" / "dangling").symlink_to("does-not-exist")
+        run(["install", str(again)], home=home)
+        second = run(["preview", "T"], home=home)
+        assert second["cached"] is False, second
+        assert second["stamp"] != first["stamp"], (first, second)
+
+
 def test_map_overrides_a_guess():
     """--map wins over whatever the heuristic picked, inf or no inf."""
     from win2xcur.parser import open_blob

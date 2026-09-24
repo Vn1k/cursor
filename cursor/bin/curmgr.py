@@ -1165,9 +1165,13 @@ def render_preview(theme: str, cell: int = 40, target: int = 32, force: bool = F
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
     out_path = PREVIEW_DIR / f"{theme}.png"
 
-    newest = max((p.stat().st_mtime for p in cursors.iterdir()), default=0)
+    # ctime, not mtime: install's copytree keeps the source mtimes, so a
+    # reinstall from older files looked unchanged. ctime can't be copied. lstat
+    # so a dangling alias symlink doesn't crash the whole strip.
+    newest = max((p.lstat().st_ctime for p in cursors.iterdir()), default=0)
     if not force and out_path.is_file() and out_path.stat().st_mtime >= newest:
-        return {"ok": True, "preview": str(out_path), "cached": True}
+        return {"ok": True, "preview": str(out_path), "cached": True,
+                "stamp": out_path.stat().st_mtime_ns}
 
     # ponytail: one process per theme, called serially from the panel. Fine for
     # the dozens of themes a person installs; batch it if that ever becomes hundreds.
@@ -1194,7 +1198,10 @@ def render_preview(theme: str, cell: int = 40, target: int = 32, force: bool = F
     canvas.format = "png"
     out_path.write_bytes(canvas.make_blob())
     canvas.close()
-    return {"ok": True, "preview": str(out_path), "cached": False, "slots": len(picks)}
+    return {"ok": True, "preview": str(out_path), "cached": False, "slots": len(picks),
+            # The panel keys the image on this, so a re-rendered strip at the
+            # same path isn't hidden behind the host's cached texture.
+            "stamp": out_path.stat().st_mtime_ns}
 
 
 # --------------------------------------------------------------------------

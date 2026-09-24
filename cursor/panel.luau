@@ -16,7 +16,7 @@ local STRIP_HEIGHT = 56
 
 local tab = "themes"
 local themes = {}
-local previews = {} -- theme name -> rendered strip path
+local previews = {} -- theme name -> { path, stamp } of its rendered strip
 local selected = ""
 local sizeIndex = 2 -- 24
 local hideTyping = false
@@ -252,7 +252,7 @@ local function loadPreviews(index)
   end
   call(`preview {shellQuote(theme.name)}`, function(result, err)
     if result ~= nil then
-      previews[theme.name] = result.preview
+      previews[theme.name] = { path = result.preview, stamp = tostring(result.stamp or "") }
       render()
     elseif index == 1 then
       -- Previews are optional: without wand the panel still lists and applies
@@ -322,8 +322,11 @@ local function themeTile(theme)
 
   local frame
   if preview ~= nil then
+    -- Keyed on the stamp: a re-rendered strip lands on the same path, and an
+    -- unchanged key would keep the host's cached texture (see serial).
     frame = ui.image({
-      width = width, height = STRIP_HEIGHT, path = preview, fit = "contain",
+      key = `strip_{theme.name}_{preview.stamp}`,
+      width = width, height = STRIP_HEIGHT, path = preview.path, fit = "contain",
       radius = 12, border = border, borderWidth = borderWidth, onClick = onClick,
     })
   else
