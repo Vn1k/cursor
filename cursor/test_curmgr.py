@@ -30,8 +30,10 @@ binds {
 """
 
 
-def run(args, home=None, expect_ok=True):
+def run(args, home=None, expect_ok=True, path_prefix=None):
     env = dict(os.environ)
+    if path_prefix is not None:
+        env["PATH"] = f"{path_prefix}{os.pathsep}{env['PATH']}"
     if home is not None:
         # site-packages under ~/.local is resolved from $HOME, which we move
         extra = site.getusersitepackages()
@@ -485,6 +487,29 @@ def test_unexpected_error_still_prints_json():
         make_cur(pack / "Normal.cur")
         result = run(["import-win", str(pack), "--sizes", "24,,32"], home=home, expect_ok=False)
         assert "ValueError" in result["error"], result
+
+
+def test_rejected_apply_restores_the_working_include():
+    """A rejected apply used to delete the include file even when the config
+    already included it from an earlier apply, leaving a dangling include."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        config = home / ".config/sway/config"
+        config.parent.mkdir(parents=True)
+        config.write_text("bindsym $mod+t exec foot\n")
+        run(["apply", "Adwaita", "--size", "24"], home=home)
+        include = home / ".config/sway/cursor.conf"
+        working = include.read_text()
+
+        # A sway that rejects every config, found first on PATH.
+        fake = home / "fakebin"
+        fake.mkdir()
+        (fake / "sway").write_text("#!/bin/sh\necho 'rejected' >&2\nexit 1\n")
+        (fake / "sway").chmod(0o755)
+        result = run(["apply", "Adwaita", "--size", "48"], home=home, expect_ok=False,
+                     path_prefix=fake)
+        assert result["layers"]["sway"]["ok"] is False, result["layers"]["sway"]
+        assert include.read_text() == working, "the working include was not restored"
 
 
 def test_map_overrides_a_guess():

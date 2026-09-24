@@ -420,6 +420,9 @@ def _apply_compositor(name: str, spec: dict, theme: str, size: int,
         text = _comment_out_block(text, block, comment)
         notes.append(f"commented out the pre-existing top-level {block} block")
 
+    # Kept for the rollback: after the first apply the config already includes
+    # this file, so deleting it on a rejection would leave a dangling include.
+    previous = include_file.read_text() if include_file.is_file() else None
     include_file.write_text(f"{comment} {MANAGED_TEXT}\n"
                             + spec["render"](theme, size, hide_typing, hide_ms, text))
 
@@ -436,7 +439,10 @@ def _apply_compositor(name: str, spec: dict, theme: str, size: int,
     if not ok:
         if backup is not None:
             shutil.copy2(backup, config)
-        include_file.unlink(missing_ok=True)
+        if previous is None:
+            include_file.unlink(missing_ok=True)
+        else:
+            include_file.write_text(previous)
         return {"ok": False, "reason": f"{name} rejected the config, rolled back: {err}"}
 
     # niri watches config.kdl, so an edit to the included file alone would not
