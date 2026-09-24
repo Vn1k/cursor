@@ -25,6 +25,10 @@ local busy = false
 -- "import" or "build": a Browse pick waiting to be scanned once the theme list
 -- refresh lets go of `busy` (doImport/doBuild return early while it is set).
 local pendingScan = nil
+-- Bumped by every loadThemes(). A refresh started by an earlier open whose
+-- callbacks land late must not clear `busy`, run the queued scan or keep
+-- rendering previews over the newer one.
+local refreshGen = 0
 local status = ""
 local statusTone = "on_surface_variant"
 local current = nil
@@ -246,21 +250,17 @@ end
 
 -- Previews are rendered one at a time: each is a fresh process, and a theme
 -- with a hundred cursors is still under a second.
-local function loadPreviews(index)
+-- Previews are optional decoration and don't hold `busy`: the list is usable,
+-- and a queued Browse scan runs, as soon as `list` and `current` are in.
+local function loadPreviews(index, gen)
   local theme = themes[index]
-  if theme == nil then
-    busy = false
-    render()
-    local scan = pendingScan
-    pendingScan = nil
-    if scan == "import" then
-      onScanImport()
-    elseif scan == "build" then
-      onScanBuild()
-    end
+  if theme == nil or gen ~= refreshGen then
     return
   end
   call(`preview {shellQuote(theme.name)}`, function(result, err)
+    if gen ~= refreshGen then
+      return
+    end
     if result ~= nil then
       previews[theme.name] = { path = result.preview, stamp = tostring(result.stamp or "") }
       render()
@@ -270,7 +270,7 @@ local function loadPreviews(index)
       -- the first theme reports; a missing dependency fails all of them.
       setStatus(err, "tertiary")
     end
-    loadPreviews(index + 1)
+    loadPreviews(index + 1, gen)
   end)
 end
 
@@ -293,6 +293,8 @@ local function loadCurrent(done)
 end
 
 loadThemes = function()
+  refreshGen += 1
+  local gen = refreshGen
   busy = true
   -- Panel state outlives a close, so a reopen would otherwise draw last
   -- session's drift warning until the refresh lands.
@@ -300,15 +302,30 @@ loadThemes = function()
   setStatus(tr("loading"))
   render()
   call("list", function(result, err)
+    if gen ~= refreshGen then
+      return
+    end
     if result == nil then
+      pendingScan = nil
       fail(err)
       return
     end
     themes = result.themes or {}
     setStatus("")
     loadCurrent(function()
+      if gen ~= refreshGen then
+        return
+      end
+      busy = false
       render()
-      loadPreviews(1)
+      local scan = pendingScan
+      pendingScan = nil
+      if scan == "import" then
+        onScanImport()
+      elseif scan == "build" then
+        onScanBuild()
+      end
+      loadPreviews(1, gen)
     end)
   end)
 end

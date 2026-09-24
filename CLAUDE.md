@@ -189,8 +189,10 @@ kill a dialog the user is still browsing. So `pick()` is fire-and-forget — the
 shell writes the chosen path into `pluginDataDir()/pick-{import,build}` and
 calls `noctalia msg panel-open` itself; `onOpen` consumes that stash through
 the path-change handlers (so the previous pack's grid is dropped) and queues the
-scan in `pendingScan`, which `loadPreviews` runs once `loadThemes()` releases
-`busy` — calling it directly would hit `busy` and do nothing. The `;`
+scan in `pendingScan`, which `loadThemes()` runs once `list` and `current` are in
+and it releases `busy` — calling it directly would hit `busy` and do nothing.
+Previews render after that without holding `busy`. `refreshGen` makes a
+refresh whose callbacks land after a newer one started do nothing at all. The `;`
 before `panel-open` (not `&&`) is what brings the panel back on Cancel.
 
 Note that `noctalia msg config-reload` reloads the Luau script but **not**
