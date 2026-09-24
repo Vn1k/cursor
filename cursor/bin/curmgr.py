@@ -246,8 +246,23 @@ def _ms_to_s(ms: int) -> int:
     return -(-ms // 1000)
 
 
+# Theme names are directory names, and imported or installed ones often have
+# spaces ("DIM Violet") or even quotes. niri's KDL and sway's config both take a
+# double-quoted string with backslash escapes; Hyprland and Mango read the raw
+# rest of the line, so they need nothing.
+def _quoted(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _unquote(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        return re.sub(r"\\(.)", r"\1", value[1:-1])
+    return value
+
+
 def _render_niri(theme: str, size: int, hide_typing: bool, hide_ms: int, config_text: str) -> str:
-    lines = ["cursor {", f'    xcursor-theme "{theme}"', f"    xcursor-size {size}"]
+    lines = ["cursor {", f"    xcursor-theme {_quoted(theme)}", f"    xcursor-size {size}"]
     if hide_typing:
         lines.append("    hide-when-typing")
     if hide_ms > 0:
@@ -256,7 +271,7 @@ def _render_niri(theme: str, size: int, hide_typing: bool, hide_ms: int, config_
     # niri allows only one top-level `environment` node, so leave XCURSOR_* to
     # environment.d when the user already owns that block.
     if not re.search(r"^environment\s*\{", config_text, re.M):
-        lines += ["environment {", f'    XCURSOR_THEME "{theme}"',
+        lines += ["environment {", f"    XCURSOR_THEME {_quoted(theme)}",
                   f'    XCURSOR_SIZE "{size}"', "}"]
     return "\n".join(lines) + "\n"
 
@@ -283,7 +298,7 @@ def _render_sway(theme: str, size: int, hide_typing: bool, hide_ms: int, config_
     # between 1 and 99; 0 is the documented "never hide".
     idle = 0 if hide_ms <= 0 else max(100, hide_ms)
     return "\n".join([
-        f"seat * xcursor_theme {theme} {size}",
+        f"seat * xcursor_theme {_quoted(theme)} {size}",
         f"seat * hide_cursor when-typing {'enable' if hide_typing else 'disable'}",
         f"seat * hide_cursor {idle}",
     ]) + "\n"
@@ -314,7 +329,7 @@ COMPOSITORS = {
         "comment_block": "cursor",
         "validate": ["niri", "validate", "-c"],
         "reload": [],  # niri watches config.kdl; the mtime bump below is enough
-        "theme_re": r'xcursor-theme\s+"([^"]*)"',
+        "theme_re": r'xcursor-theme\s+("(?:[^"\\]|\\.)*")',
         "size_re": r"xcursor-size\s+(\d+)",
         "typing_re": r"hide-when-typing",
         "ms_re": r"hide-after-inactive-ms\s+(\d+)",
@@ -347,8 +362,8 @@ COMPOSITORS = {
         "render": _render_sway,
         "validate": ["sway", "-C", "-c"],
         "reload": [["swaymsg", "reload"]],
-        "theme_re": r"^seat\s+\S+\s+xcursor_theme\s+(\S+)",
-        "size_re": r"^seat\s+\S+\s+xcursor_theme\s+\S+\s+(\d+)",
+        "theme_re": r'^seat\s+\S+\s+xcursor_theme\s+("(?:[^"\\]|\\.)*"|\S+)',
+        "size_re": r'^seat\s+\S+\s+xcursor_theme\s+(?:"(?:[^"\\]|\\.)*"|\S+)\s+(\d+)',
         "typing_re": r"hide_cursor\s+when-typing\s+enable",
         "ms_re": r"hide_cursor\s+(\d+)",
         "ms_scale": 1,
@@ -397,7 +412,7 @@ def _read_compositor(spec: dict) -> dict:
     size = re.search(spec["size_re"], text, re.M)
     ms = re.search(spec["ms_re"], text, re.M)
     return {
-        "theme": theme.group(1).strip() if theme else "",
+        "theme": _unquote(theme.group(1)) if theme else "",
         "size": int(size.group(1)) if size else 0,
         "hide_when_typing": bool(re.search(spec["typing_re"], text, re.M)),
         "hide_after_inactive_ms": int(ms.group(1)) * spec["ms_scale"] if ms else 0,

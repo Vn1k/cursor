@@ -512,6 +512,31 @@ def test_rejected_apply_restores_the_working_include():
         assert include.read_text() == working, "the working include was not restored"
 
 
+def test_theme_names_with_spaces_and_quotes_survive_every_compositor():
+    """Imported and installed themes are named after their directory, which can
+    hold spaces ("DIM Violet") or quotes. sway used to read back only the first
+    word and a quote broke niri's KDL; niri validates this one for real."""
+    name = 'My "Q" Theme'
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        make_theme(home / ".local/share/icons" / name, name="Q")
+        (home / ".config/niri").mkdir(parents=True)
+        (home / ".config/niri/config.kdl").write_text(MINIMAL_NIRI)
+        for config_rel, body, *_ in COMPOSITOR_CASES.values():
+            (home / ".config" / config_rel).parent.mkdir(parents=True)
+            (home / ".config" / config_rel).write_text(body)
+
+        result = run(["apply", name, "--size", "32"], home=home)
+        for comp in ("niri", "hyprland", "sway", "mango"):
+            assert result["layers"][comp]["ok"], (comp, result["layers"][comp])
+        state = run(["current"], home=home)
+        for comp in ("niri", "hyprland", "sway", "mango"):
+            assert state["layers"][comp] == name, (comp, state["layers"][comp])
+        # No `consistent` check: the memory gsettings backend forgets between
+        # processes and reads back the default, so it only agrees for Adwaita.
+        assert state["size"] == 32, state
+
+
 def test_map_overrides_a_guess():
     """--map wins over whatever the heuristic picked, inf or no inf."""
     from win2xcur.parser import open_blob
@@ -720,7 +745,7 @@ COMPOSITOR_CASES = {
     "sway": (
         "sway/config", "bindsym $mod+t exec foot\n", "sway/cursor.conf",
         "include {cursor}",
-        ["seat * xcursor_theme Adwaita 32",
+        ['seat * xcursor_theme "Adwaita" 32',
          "seat * hide_cursor when-typing enable", "seat * hide_cursor 3000"],
     ),
     "mango": (
