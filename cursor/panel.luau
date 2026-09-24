@@ -22,6 +22,9 @@ local sizeIndex = 2 -- 24
 local hideTyping = false
 local hideMs = ""
 local busy = false
+-- "import" or "build": a Browse pick waiting to be scanned once the theme list
+-- refresh lets go of `busy` (doImport/doBuild return early while it is set).
+local pendingScan = nil
 local status = ""
 local statusTone = "on_surface_variant"
 local current = nil
@@ -248,6 +251,13 @@ local function loadPreviews(index)
   if theme == nil then
     busy = false
     render()
+    local scan = pendingScan
+    pendingScan = nil
+    if scan == "import" then
+      onScanImport()
+    elseif scan == "build" then
+      onScanBuild()
+    end
     return
   end
   call(`preview {shellQuote(theme.name)}`, function(result, err)
@@ -798,28 +808,30 @@ end
 function onOpen(_context)
   -- The picker reopens this panel when it is done, so an open is also how a
   -- chosen path comes back.
+  -- Through the path-change handlers, so a new pick also drops the previous
+  -- pack's grid, report and hand-made mapping.
   consumePick("import", function(path)
-    importPath = path
+    onImportPathChange(path)
     tab = "import"
   end)
   consumePick("build", function(path)
-    buildPath = path
+    onBuildPathChange(path)
     tab = "build"
   end)
   consumePick("install", function(path)
     installPath = path
     tab = "install"
   end)
-  loadThemes()
   -- Picking a folder is the whole intent, so read it straight away: the user
   -- gets the mapping grid without a second click, and still decides when
-  -- anything is written. Only the tab the pick landed on scans - `busy` would
-  -- swallow the second call anyway, and a pick only ever sets one field.
+  -- anything is written. Only the tab the pick landed on scans, and only after
+  -- loadThemes() below is done with `busy`.
   if tab == "import" and trim(importPath) ~= "" and maps.import.scanned ~= trim(importPath) then
-    onScanImport()
+    pendingScan = "import"
   elseif tab == "build" and trim(buildPath) ~= "" and maps.build.scanned ~= trim(buildPath) then
-    onScanBuild()
+    pendingScan = "build"
   end
+  loadThemes()
 end
 
 function onPickImportDir()

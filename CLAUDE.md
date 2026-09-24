@@ -187,7 +187,10 @@ are easy to rediscover the hard way: a Noctalia panel dismisses as soon as
 zenity takes focus, and `runAsync`'s `timeoutMs` is clamped to 60s, which would
 kill a dialog the user is still browsing. So `pick()` is fire-and-forget — the
 shell writes the chosen path into `pluginDataDir()/pick-{import,build}` and
-calls `noctalia msg panel-open` itself; `onOpen` consumes that stash. The `;`
+calls `noctalia msg panel-open` itself; `onOpen` consumes that stash through
+the path-change handlers (so the previous pack's grid is dropped) and queues the
+scan in `pendingScan`, which `loadPreviews` runs once `loadThemes()` releases
+`busy` — calling it directly would hit `busy` and do nothing. The `;`
 before `panel-open` (not `&&`) is what brings the panel back on Cancel.
 
 Note that `noctalia msg config-reload` reloads the Luau script but **not**
