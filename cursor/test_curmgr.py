@@ -537,6 +537,19 @@ def test_theme_names_with_spaces_and_quotes_survive_every_compositor():
         assert state["size"] == 32, state
 
 
+def test_import_without_a_name_uses_the_folder_name():
+    """A heuristic pack (no Install.inf) with the panel's name field empty used
+    to fail with "refusing an unsafe theme name: ''"."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        pack = home / "Kitty Pack"
+        pack.mkdir()
+        make_cur(pack / "Normal.cur")
+        result = run(["import-win", str(pack), "--sizes", "24"], home=home)
+        assert result["name"] == "Kitty Pack", result["name"]
+        assert (home / ".local/share/icons/Kitty Pack/cursors/default").exists()
+
+
 def test_map_overrides_a_guess():
     """--map wins over whatever the heuristic picked, inf or no inf."""
     from win2xcur.parser import open_blob

@@ -776,8 +776,11 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
                 role_frames[role] = cursor.frames
         if role_frames:
             method = f"inf:{inf.name}"
-            name = name or parsed.name
+            name = name or parsed.name or ""
             break
+    # No name from the user or an .inf (heuristic packs, or an .inf without a
+    # name): the folder's, as build_from_pngs does.
+    name = name or root.name
 
     if not role_frames:
         # Packs ship near-duplicates - "Normal Select" beside "My Melody
