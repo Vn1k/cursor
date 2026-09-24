@@ -1174,10 +1174,6 @@ def _render_role_previews(role_frames: dict, dest_dir: Path, target: int = 32,
 
 
 def render_preview(theme: str, cell: int = 40, target: int = 32, force: bool = False) -> dict:
-    from wand.color import Color
-    from wand.image import Image
-    from win2xcur.parser import open_blob
-
     root = find_theme(theme)
     cursors = root / "cursors"
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
@@ -1185,11 +1181,19 @@ def render_preview(theme: str, cell: int = 40, target: int = 32, force: bool = F
 
     # ctime, not mtime: install's copytree keeps the source mtimes, so a
     # reinstall from older files looked unchanged. ctime can't be copied. lstat
-    # so a dangling alias symlink doesn't crash the whole strip.
-    newest = max((p.lstat().st_ctime for p in cursors.iterdir()), default=0)
-    if not force and out_path.is_file() and out_path.stat().st_mtime >= newest:
-        return {"ok": True, "preview": str(out_path), "cached": True,
-                "stamp": out_path.stat().st_mtime_ns}
+    # so a dangling alias symlink doesn't crash the whole strip. The directory's
+    # own ctime covers a cursor being added or removed.
+    newest = max([cursors.stat().st_ctime] + [p.lstat().st_ctime for p in cursors.iterdir()])
+    if not force and out_path.is_file():
+        cached = out_path.stat()
+        if cached.st_mtime >= newest:
+            return {"ok": True, "preview": str(out_path), "cached": True,
+                    "stamp": cached.st_mtime_ns}
+
+    # Imported only when a strip is actually drawn: the panel asks for one per
+    # theme on every open, and a cached answer shouldn't pay for ImageMagick.
+    from wand.color import Color
+    from wand.image import Image
 
     # ponytail: one process per theme, called serially from the panel. Fine for
     # the dozens of themes a person installs; batch it if that ever becomes hundreds.

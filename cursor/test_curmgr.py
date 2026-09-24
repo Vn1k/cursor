@@ -649,6 +649,18 @@ def test_hash_in_a_theme_name_survives_hyprland():
         assert run(["current"], home=home)["layers"]["hyprland"] == "C#-Cursor"
 
 
+def test_preview_rerenders_when_a_cursor_is_removed():
+    """Removing a cursor changes no remaining file's ctime, so the strip kept
+    showing the removed one; the directory's own ctime catches it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        run(["install", str(make_theme(home / "src" / "T", name="T"))], home=home)
+        run(["preview", "T"], home=home)
+        assert run(["preview", "T"], home=home)["cached"] is True
+        (home / ".local/share/icons/T/cursors/arrow").unlink()
+        assert run(["preview", "T"], home=home)["cached"] is False
+
+
 def test_map_overrides_a_guess():
     """--map wins over whatever the heuristic picked, inf or no inf."""
     from win2xcur.parser import open_blob
