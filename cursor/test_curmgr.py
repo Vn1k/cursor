@@ -457,6 +457,36 @@ def test_interrupted_write_never_shows_as_a_theme():
             assert not leftovers, leftovers
 
 
+def test_install_from_inside_user_icons_keeps_the_theme():
+    """install used to rmtree the destination before copying, so a source already
+    in ~/.local/share/icons deleted itself - and pointing at the icons directory
+    would have wiped every user theme. Staging copies first, then swaps."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        icons = home / ".local/share/icons"
+        make_theme(icons / "Foo", name="Foo")
+        make_theme(icons / "Bar", name="Bar")
+
+        run(["install", str(icons / "Foo")], home=home)
+        run(["install", str(icons)], home=home)
+        for name in ("Foo", "Bar"):
+            assert (icons / name / "cursors" / "default").exists(), f"{name} was deleted"
+        leftovers = [p.name for p in icons.iterdir() if p.name.startswith(".")]
+        assert not leftovers, leftovers
+
+
+def test_unexpected_error_still_prints_json():
+    """Only Fail and ImportError used to be caught; anything else printed a
+    traceback with empty stdout, which the panel reads as 'engine missing'."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        pack = home / "pack"
+        pack.mkdir()
+        make_cur(pack / "Normal.cur")
+        result = run(["import-win", str(pack), "--sizes", "24,,32"], home=home, expect_ok=False)
+        assert "ValueError" in result["error"], result
+
+
 def test_map_overrides_a_guess():
     """--map wins over whatever the heuristic picked, inf or no inf."""
     from win2xcur.parser import open_blob

@@ -106,9 +106,13 @@ produce `{role: frames}` and hand it to the single sink `write_theme()`, which
 resizes, writes the canonical cursor and symlinks its aliases. Add a new source
 format by producing that dict, not by writing cursor files.
 
-`write_theme()` builds into a hidden `.<name>.partial` beside the final
-directory and renames it into place only once complete; `list_themes()` skips
-dot-entries. A run killed halfway therefore leaves nothing in the theme list.
+`write_theme()` and `install_theme()` both build into a hidden `.<name>.partial`
+beside the final directory (`_stage()`) and rename it into place only once
+complete (`_swap_in()`); `list_themes()` and `_find_theme_roots()` skip
+dot-entries. A run killed halfway therefore leaves nothing in the theme list,
+and since the copy finishes before anything is deleted, installing a theme from
+inside `~/.local/share/icons` onto itself is harmless. `main()` turns any other
+exception into `{"ok": false}` too, so stdout is always one JSON object.
 
 `install_theme()` is deliberately **not** part of that pipeline: a finished
 Xcursor theme is copied verbatim, never re-encoded. Its `copytree(...,

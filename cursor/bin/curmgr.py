@@ -613,21 +613,7 @@ def write_theme(name: str, role_frames: dict, inherits: str = "Adwaita",
     # install_theme() already vets names; this is the sink both builders share,
     # so checking here covers any future source format too.
     name = _safe_theme_name(name)
-    root = USER_ICONS / name
-    # Built beside the final directory and swapped in only once complete. A run
-    # killed halfway (the panel's runAsync timeout, say) used to leave a
-    # half-written theme that still showed up in the list; the hidden name keeps
-    # a leftover out of list_themes(), and the next build clears it.
-    staging = USER_ICONS / f".{name}.partial"
-    retired = USER_ICONS / f".{name}.old"
-    USER_ICONS.mkdir(parents=True, exist_ok=True)
-    # Belt and braces, as in install_theme: catches a symlink planted in
-    # USER_ICONS itself, which a name check cannot see.
-    for path in (root, staging, retired):
-        if not _is_under(path, USER_ICONS):
-            raise Fail(f"refusing to write outside {USER_ICONS}: {path}")
-    for path in (staging, retired):
-        _remove_path(path)
+    root, staging, retired = _stage(name)
     cursors = staging / "cursors"
     cursors.mkdir(parents=True)
 
@@ -654,12 +640,36 @@ def write_theme(name: str, role_frames: dict, inherits: str = "Adwaita",
     )
     (staging / "cursor.theme").write_text(f"[Icon Theme]\nName={name}\nInherits={name}\n")
 
+    _swap_in(root, staging, retired)
+    return {"path": str(root), "cursors": written}
+
+
+# Both writers build a theme beside its final directory and swap it in only
+# once complete. A run killed halfway (the panel's runAsync timeout, say) used
+# to leave a half-written theme that still showed up in the list; the hidden
+# name keeps a leftover out of list_themes(), and the next write clears it.
+# Copying before deleting also means installing a theme onto itself is harmless.
+def _stage(name: str) -> tuple[Path, Path, Path]:
+    root = USER_ICONS / name
+    staging = USER_ICONS / f".{name}.partial"
+    retired = USER_ICONS / f".{name}.old"
+    USER_ICONS.mkdir(parents=True, exist_ok=True)
+    # Belt and braces: the name is sanitised by the caller, this catches a
+    # symlink planted in USER_ICONS itself, which a name check cannot see.
+    for path in (root, staging, retired):
+        if not _is_under(path, USER_ICONS):
+            raise Fail(f"refusing to write outside {USER_ICONS}: {path}")
+    for path in (staging, retired):
+        _remove_path(path)
+    return root, staging, retired
+
+
+def _swap_in(root: Path, staging: Path, retired: Path) -> None:
     # Two renames, so the old theme is only deleted once the new one is in place.
     if root.exists() or root.is_symlink():
         root.rename(retired)
     staging.rename(root)
     _remove_path(retired)
-    return {"path": str(root), "cursors": written}
 
 
 def _remove_path(path: Path) -> None:
@@ -839,7 +849,9 @@ def _find_theme_roots(root: Path, max_depth: int = 3) -> list[Path]:
         if depth >= max_depth:
             continue
         try:
-            stack.extend((d, depth + 1) for d in current.iterdir() if d.is_dir())
+            # Dot-directories are write_theme()'s staging, skipped like list_themes().
+            stack.extend((d, depth + 1) for d in current.iterdir()
+                         if d.is_dir() and not d.name.startswith("."))
         except OSError:
             continue
     return sorted(found)
@@ -881,20 +893,13 @@ def install_theme(source: Path, name: str = "") -> dict:
     installed, replaced = [], []
     for theme_root in roots:
         dest_name = _safe_theme_name(name or _theme_dir_name(theme_root))
-        dest = USER_ICONS / dest_name
-        # Belt and braces: the name is sanitised above, this catches symlink
-        # games in USER_ICONS itself before anything is deleted.
-        USER_ICONS.mkdir(parents=True, exist_ok=True)
-        if not _is_under(dest.parent / dest.name, USER_ICONS):
-            raise Fail(f"refusing to write outside {USER_ICONS}: {dest}")
+        dest, staging, retired = _stage(dest_name)
         if dest.exists() or dest.is_symlink():
-            if not _is_under(dest, USER_ICONS):
-                raise Fail(f"refusing to replace a theme outside {USER_ICONS}: {dest}")
-            shutil.rmtree(dest) if dest.is_dir() and not dest.is_symlink() else dest.unlink()
             replaced.append(dest_name)
         # symlinks=True is load-bearing: a real theme is roughly half alias
         # symlinks, and dereferencing them bloats it and loses the aliasing.
-        shutil.copytree(theme_root, dest, symlinks=True)
+        shutil.copytree(theme_root, staging, symlinks=True)
+        _swap_in(dest, staging, retired)
         installed.append(dest_name)
 
     return {"ok": True, "installed": installed, "replaced": replaced,
@@ -1287,6 +1292,12 @@ def main(argv=None) -> int:
         json.dump({"ok": False, "error": f"missing dependency: {exc}. "
                                          "Install win2xcur, python-wand and ImageMagick."},
                   sys.stdout)
+        print()
+        return 1
+    except Exception as exc:  # noqa: BLE001 - the one-JSON-object contract
+        # Anything unexpected still answers in JSON: the panel treats empty
+        # stdout as "engine missing" and would only show a traceback's first line.
+        json.dump({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, sys.stdout)
         print()
         return 1
 
