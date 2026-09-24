@@ -989,8 +989,10 @@ local function applyMapResult(st, source, result)
 
   if result.written then
     selected = result.name
-    setStatus(`{tr("built")}: {result.name}`, "primary")
-    noctalia.notify(tr("title"), `{tr("built")}: {result.name}`)
+    -- Same wording as install: overwriting a theme of that name shouldn't be silent.
+    local verb = result.replaced and tr("replaced") or tr("built")
+    setStatus(`{verb}: {result.name}`, "primary")
+    noctalia.notify(tr("title"), `{verb}: {result.name}`)
     call("list", function(listResult)
       if listResult ~= nil then
         themes = listResult.themes or {}

@@ -665,8 +665,9 @@ def write_theme(name: str, role_frames: dict, inherits: str = "Adwaita",
     )
     (staging / "cursor.theme").write_text(f"[Icon Theme]\nName={name}\nInherits={name}\n")
 
+    replaced = root.exists() or root.is_symlink()
     _swap_in(root, staging, retired)
-    return {"path": str(root), "cursors": written}
+    return {"path": str(root), "cursors": written, "replaced": replaced}
 
 
 # Both writers build a theme beside its final directory and swap it in only
@@ -780,11 +781,12 @@ def import_windows(source: Path, name: str, shadow_opts=None, sizes=NOMINAL_SIZE
                 role_frames[role] = cursor.frames
         if role_frames:
             method = f"inf:{inf.name}"
-            name = name or parsed.name or ""
+            name = name or parsed.name
             break
     # No name from the user or an .inf (heuristic packs, or an .inf without a
-    # name): the folder's, as build_from_pngs does.
-    name = name or root.name
+    # name): the folder's, as build_from_pngs does, minus any leading dot so an
+    # extracted ".mypack" doesn't become a hidden theme.
+    name = name or root.name.lstrip(".")
 
     if not role_frames:
         # Packs ship near-duplicates - "Normal Select" beside "My Melody

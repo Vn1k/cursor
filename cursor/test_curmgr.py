@@ -605,6 +605,21 @@ def test_theme_name_cannot_inject_config_lines():
                                    home=home, expect_ok=False)["error"], name
 
 
+def test_import_from_a_dot_folder_is_visible_and_reports_replacing():
+    """A folder named ".mypack" used to become a hidden theme the list skips, and
+    importing over an existing theme of that name said nothing about it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        pack = home / ".mypack"
+        pack.mkdir()
+        make_cur(pack / "Normal.cur")
+        first = run(["import-win", str(pack), "--sizes", "24"], home=home)
+        assert first["name"] == "mypack" and first["replaced"] is False, first
+        assert "mypack" in [t["name"] for t in run(["list"], home=home)["themes"]]
+        second = run(["import-win", str(pack), "--sizes", "24"], home=home)
+        assert second["replaced"] is True, second
+
+
 def test_map_overrides_a_guess():
     """--map wins over whatever the heuristic picked, inf or no inf."""
     from win2xcur.parser import open_blob
