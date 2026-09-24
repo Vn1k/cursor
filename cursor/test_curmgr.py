@@ -585,6 +585,26 @@ def test_preview_rerenders_after_a_reinstall_from_older_files():
         assert second["stamp"] != first["stamp"], (first, second)
 
 
+def test_theme_name_cannot_inject_config_lines():
+    """A theme directory named with a newline used to be written raw into
+    hypr/cursor.conf, adding a line of its own that `hyprctl reload` then runs."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        hypr = home / ".config/hypr"
+        hypr.mkdir(parents=True)
+        (hypr / "hyprland.conf").write_text("bind = SUPER, T, exec, foot\n")
+        evil = "Pack\nexec = touch pwned"
+        make_theme(home / "src" / evil, name="Pack")
+        # No index.theme: install falls back to the directory name.
+        (home / "src" / evil / "index.theme").unlink()
+        result = run(["install", str(home / "src" / evil)], home=home, expect_ok=False)
+        assert "unsafe theme name" in result["error"], result
+        assert not (home / ".local/share/icons" / evil).exists()
+        for name in ("tab\tname", ".hidden"):
+            assert "unsafe" in run(["install", str(home / "src" / evil), "--name", name],
+                                   home=home, expect_ok=False)["error"], name
+
+
 def test_map_overrides_a_guess():
     """--map wins over whatever the heuristic picked, inf or no inf."""
     from win2xcur.parser import open_blob

@@ -896,6 +896,12 @@ def _safe_theme_name(name: str) -> str:
     name = name.strip().strip("/")
     if not name or name in {".", ".."} or "/" in name or "\\" in name or ".." in name:
         raise Fail(f"refusing an unsafe theme name: {name!r}")
+    # The name ends up inside compositor configs and environment.d. A newline
+    # would add a line of its own (`exec = ...` in Hyprland, which the reload
+    # right after runs), so anything non-printable is refused. A leading dot
+    # would make the theme hidden: list_themes() skips dot-entries.
+    if not name.isprintable() or name.startswith("."):
+        raise Fail(f"refusing an unsafe theme name: {name!r}")
     return name
 
 
