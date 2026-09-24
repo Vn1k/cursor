@@ -257,8 +257,9 @@ def _ms_to_s(ms: int) -> int:
 
 # Theme names are directory names, and imported or installed ones often have
 # spaces ("DIM Violet") or even quotes. niri's KDL and sway's config both take a
-# double-quoted string with backslash escapes; Hyprland and Mango read the raw
-# rest of the line, so they need nothing.
+# double-quoted string with backslash escapes. Hyprland reads the raw rest of the
+# line but starts a comment at any `#`, so it writes `##` (its literal `#`);
+# Mango reads the raw rest of the line. Each row's `decode` undoes its encoding.
 def _quoted(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -292,7 +293,7 @@ def _render_hyprland(theme: str, size: int, hide_typing: bool, hide_ms: int, con
     # the parser is last-wins and an omitted key would leave an earlier one of
     # the user's standing when the panel turns the toggle off.
     return "\n".join([
-        f"env = XCURSOR_THEME,{theme}",
+        f"env = XCURSOR_THEME,{theme.replace('#', '##')}",
         f"env = XCURSOR_SIZE,{size}",
         "cursor {",
         f"    hide_on_key_press = {'true' if hide_typing else 'false'}",
@@ -339,6 +340,7 @@ COMPOSITORS = {
         "validate": ["niri", "validate", "-c"],
         "reload": [],  # niri watches config.kdl; the mtime bump below is enough
         "theme_re": r'xcursor-theme\s+("(?:[^"\\]|\\.)*")',
+        "decode": _unquote,
         "size_re": r"xcursor-size\s+(\d+)",
         "typing_re": r"hide-when-typing",
         "ms_re": r"hide-after-inactive-ms\s+(\d+)",
@@ -358,6 +360,7 @@ COMPOSITORS = {
         "validate": None,
         "reload": [["hyprctl", "reload"], ["hyprctl", "setcursor", "{theme}", "{size}"]],
         "theme_re": r"^env\s*=\s*XCURSOR_THEME,(.*)$",
+        "decode": lambda value: value.strip().replace("##", "#"),
         "size_re": r"^env\s*=\s*XCURSOR_SIZE,(\d+)$",
         "typing_re": r"hide_on_key_press\s*=\s*true",
         "ms_re": r"inactive_timeout\s*=\s*(\d+)",
@@ -372,6 +375,7 @@ COMPOSITORS = {
         "validate": ["sway", "-C", "-c"],
         "reload": [["swaymsg", "reload"]],
         "theme_re": r'^seat\s+\S+\s+xcursor_theme\s+("(?:[^"\\]|\\.)*"|\S+)',
+        "decode": _unquote,
         "size_re": r'^seat\s+\S+\s+xcursor_theme\s+(?:"(?:[^"\\]|\\.)*"|\S+)\s+(\d+)',
         "typing_re": r"hide_cursor\s+when-typing\s+enable",
         "ms_re": r"hide_cursor\s+(\d+)",
@@ -390,6 +394,7 @@ COMPOSITORS = {
         "validate": None,
         "reload": [["mmsg", "dispatch", "reload_config"]],
         "theme_re": r"^cursor_theme=(.*)$",
+        "decode": str.strip,
         "size_re": r"^cursor_size=(\d+)$",
         "typing_re": r"^cursor_hide_on_keypress=[1-9]",
         "ms_re": r"^cursor_hide_timeout=(\d+)$",
@@ -421,7 +426,7 @@ def _read_compositor(spec: dict) -> dict:
     size = re.search(spec["size_re"], text, re.M)
     ms = re.search(spec["ms_re"], text, re.M)
     return {
-        "theme": _unquote(theme.group(1)) if theme else "",
+        "theme": spec["decode"](theme.group(1)) if theme else "",
         "size": int(size.group(1)) if size else 0,
         "hide_when_typing": bool(re.search(spec["typing_re"], text, re.M)),
         "hide_after_inactive_ms": int(ms.group(1)) * spec["ms_scale"] if ms else 0,

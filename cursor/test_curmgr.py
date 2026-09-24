@@ -635,6 +635,20 @@ def test_gsettings_without_its_schema_is_not_drift():
         assert state["consistent"], state["layers"]
 
 
+def test_hash_in_a_theme_name_survives_hyprland():
+    """Hyprland starts a comment at any `#`, so `C#-Cursor` was read as `C`
+    while the panel, reading the file back, still reported it consistent."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        make_theme(home / ".local/share/icons/C#-Cursor", name="C")
+        hypr = home / ".config/hypr"
+        hypr.mkdir(parents=True)
+        (hypr / "hyprland.conf").write_text("bind = SUPER, T, exec, foot\n")
+        run(["apply", "C#-Cursor", "--size", "24"], home=home)
+        assert "env = XCURSOR_THEME,C##-Cursor" in (hypr / "cursor.conf").read_text()
+        assert run(["current"], home=home)["layers"]["hyprland"] == "C#-Cursor"
+
+
 def test_map_overrides_a_guess():
     """--map wins over whatever the heuristic picked, inf or no inf."""
     from win2xcur.parser import open_blob
