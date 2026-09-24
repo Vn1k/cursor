@@ -620,6 +620,21 @@ def test_import_from_a_dot_folder_is_visible_and_reports_replacing():
         assert second["replaced"] is True, second
 
 
+def test_gsettings_without_its_schema_is_not_drift():
+    """glib2 installed but gsettings-desktop-schemas missing: every `gsettings get`
+    fails, and the empty value used to keep the drift warning up forever."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        fake = home / "bin"
+        fake.mkdir()
+        (fake / "gsettings").write_text("#!/bin/sh\necho 'No such schema' >&2\nexit 1\n")
+        (fake / "gsettings").chmod(0o755)
+        run(["apply", "Adwaita", "--size", "24"], home=home, path=str(fake))
+        state = run(["current"], home=home, path=str(fake))
+        assert "gsettings" not in state["layers"], state["layers"]
+        assert state["consistent"], state["layers"]
+
+
 def test_map_overrides_a_guess():
     """--map wins over whatever the heuristic picked, inf or no inf."""
     from win2xcur.parser import open_blob

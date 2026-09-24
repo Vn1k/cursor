@@ -178,17 +178,21 @@ def find_theme(name: str) -> Path:
 # reading current state
 # --------------------------------------------------------------------------
 
-def _gsettings(key: str) -> str:
+def _gsettings(key: str) -> str | None:
+    """The key's value, or None when gsettings can't be read at all: not
+    installed, or installed without the org.gnome.desktop.interface schema."""
     if not shutil.which("gsettings"):
-        return ""
+        return None
     try:
-        out = subprocess.run(
+        proc = subprocess.run(
             ["gsettings", "get", "org.gnome.desktop.interface", key],
             capture_output=True, text=True, timeout=10,
-        ).stdout.strip()
+        )
     except (OSError, subprocess.SubprocessError):
-        return ""
-    return out.strip("'\"")
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip().strip("'\"")
 
 
 def _ini_value(path: Path, key: str) -> str:
@@ -208,11 +212,12 @@ def read_current() -> dict:
     states = {key: _read_compositor(spec) for key, spec in detected_compositors().items()}
     first = next(iter(states.values()), {})
     layers = {key: state["theme"] for key, state in states.items()}
-    # Without the gsettings binary that layer can never be written, so it
-    # contributes no key - like an undetected compositor. A key holding "" would
-    # make `consistent` permanently false.
-    if shutil.which("gsettings"):
-        layers["gsettings"] = _gsettings("cursor-theme")
+    # Without a working gsettings (no binary, or no schema) that layer can never
+    # be written, so it contributes no key - like an undetected compositor. A key
+    # holding "" would make `consistent` permanently false.
+    gsettings_theme = _gsettings("cursor-theme")
+    if gsettings_theme is not None:
+        layers["gsettings"] = gsettings_theme
     layers |= {
         "gtk3": _ini_value(CONFIG / "gtk-3.0" / "settings.ini", "gtk-cursor-theme-name"),
         "gtk4": _ini_value(CONFIG / "gtk-4.0" / "settings.ini", "gtk-cursor-theme-name"),
