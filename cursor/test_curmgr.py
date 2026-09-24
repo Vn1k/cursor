@@ -30,10 +30,10 @@ binds {
 """
 
 
-def run(args, home=None, expect_ok=True, path_prefix=None):
+def run(args, home=None, expect_ok=True, path=None):
     env = dict(os.environ)
-    if path_prefix is not None:
-        env["PATH"] = f"{path_prefix}{os.pathsep}{env['PATH']}"
+    if path is not None:
+        env["PATH"] = path
     if home is not None:
         # site-packages under ~/.local is resolved from $HOME, which we move
         extra = site.getusersitepackages()
@@ -507,7 +507,7 @@ def test_rejected_apply_restores_the_working_include():
         (fake / "sway").write_text("#!/bin/sh\necho 'rejected' >&2\nexit 1\n")
         (fake / "sway").chmod(0o755)
         result = run(["apply", "Adwaita", "--size", "48"], home=home, expect_ok=False,
-                     path_prefix=fake)
+                     path=f"{fake}{os.pathsep}{os.environ['PATH']}")
         assert result["layers"]["sway"]["ok"] is False, result["layers"]["sway"]
         assert include.read_text() == working, "the working include was not restored"
 
@@ -548,6 +548,20 @@ def test_import_without_a_name_uses_the_folder_name():
         result = run(["import-win", str(pack), "--sizes", "24"], home=home)
         assert result["name"] == "Kitty Pack", result["name"]
         assert (home / ".local/share/icons/Kitty Pack/cursors/default").exists()
+
+
+def test_no_gsettings_is_not_drift():
+    """On a box without the gsettings binary that layer read back as "" forever,
+    so the panel showed the drift warning after every apply."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        bare = home / "bin"   # a PATH with no gsettings (python is called by path)
+        bare.mkdir()
+        run(["apply", "Adwaita", "--size", "24"], home=home, path=str(bare))
+        state = run(["current"], home=home, path=str(bare))
+        assert "gsettings" not in state["layers"], state["layers"]
+        assert state["consistent"], state["layers"]
+        assert state["theme"] == "Adwaita", state
 
 
 def test_map_overrides_a_guess():

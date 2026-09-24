@@ -208,8 +208,12 @@ def read_current() -> dict:
     states = {key: _read_compositor(spec) for key, spec in detected_compositors().items()}
     first = next(iter(states.values()), {})
     layers = {key: state["theme"] for key, state in states.items()}
+    # Without the gsettings binary that layer can never be written, so it
+    # contributes no key - like an undetected compositor. A key holding "" would
+    # make `consistent` permanently false.
+    if shutil.which("gsettings"):
+        layers["gsettings"] = _gsettings("cursor-theme")
     layers |= {
-        "gsettings": _gsettings("cursor-theme"),
         "gtk3": _ini_value(CONFIG / "gtk-3.0" / "settings.ini", "gtk-cursor-theme-name"),
         "gtk4": _ini_value(CONFIG / "gtk-4.0" / "settings.ini", "gtk-cursor-theme-name"),
         "xdg_default": _index_field(HOME / ".icons" / "default" / "index.theme", "Inherits"),
@@ -218,7 +222,7 @@ def read_current() -> dict:
     present = [v for v in layers.values() if v]
     return {
         "ok": True,
-        "theme": first.get("theme") or layers["gsettings"],
+        "theme": first.get("theme") or layers.get("gsettings") or layers["gtk3"],
         "size": first.get("size") or int(_gsettings("cursor-size") or 24),
         "hide_when_typing": bool(first.get("hide_when_typing")),
         "hide_after_inactive_ms": first.get("hide_after_inactive_ms", 0),
