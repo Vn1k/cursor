@@ -956,6 +956,51 @@ def test_apply_rejects_unknown_theme():
         assert not (home / ".config/niri/cursor.kdl").exists()
 
 
+def _nominals(path):
+    from win2xcur.parser import open_blob
+    return {image.nominal for frame in open_blob(Path(path).read_bytes()).frames for image in frame}
+
+
+def _image_bytes(path, nominal):
+    from win2xcur.parser import open_blob
+    image = next(i for f in open_blob(Path(path).read_bytes()).frames for i in f if i.nominal == nominal)
+    return bytes(image.image.export_pixels(channel_map="RGBA"))
+
+
+def test_apply_adds_missing_sizes_for_every_compositor():
+    # 28 at scale 1.75 is 56 to niri/Hyprland and 49 to wlroots; a theme
+    # without those sizes silently falls back to its nearest one.
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        theme = make_theme(home / ".local/share/icons/Few", name="Few")
+        left_ptr = theme / "cursors/left_ptr"
+        assert _nominals(left_ptr) == {32}
+        before = _image_bytes(left_ptr, 32)
+
+        result = run(["apply", "Few", "--size", "28"], home=home)
+        assert {28, 35, 42, 49, 56, 84} <= set(result["sizes"]["added"]), result["sizes"]
+        assert {28, 32, 35, 42, 49, 56, 84} <= _nominals(left_ptr)
+        assert (theme / "cursors/default").is_symlink(), "aliases must stay symlinks"
+        assert premultiplied(left_ptr)
+        # re-encoding the untouched size must not premultiply it a second time
+        after = _image_bytes(left_ptr, 32)
+        assert max(abs(a - b) for a, b in zip(before, after)) <= 1, "existing size changed"
+
+        mtime = left_ptr.stat().st_mtime_ns
+        again = run(["apply", "Few", "--size", "28"], home=home)
+        assert again["sizes"]["added"] == [], again["sizes"]
+        assert left_ptr.stat().st_mtime_ns == mtime, "complete theme was rewritten"
+
+
+def test_apply_leaves_system_themes_alone():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        before = ADWAITA.resolve().stat().st_mtime_ns
+        result = run(["apply", "Adwaita", "--size", "28"], home=home)
+        assert "note" in result["sizes"] and result["sizes"]["added"] == [], result["sizes"]
+        assert ADWAITA.resolve().stat().st_mtime_ns == before
+
+
 # ------------------------------------------------------------ 5. install e2e
 def make_theme(root, name="Demo Theme", inherits="Adwaita"):
     """A minimal but realistic Xcursor theme: one real cursor plus alias symlinks."""
