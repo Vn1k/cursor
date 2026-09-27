@@ -218,6 +218,8 @@ def read_current() -> dict:
     gsettings_theme = _gsettings("cursor-theme")
     if gsettings_theme is not None:
         layers["gsettings"] = gsettings_theme
+    if shutil.which("flatpak"):
+        layers["flatpak"] = _ini_value(DATA / "flatpak" / "overrides" / "global", "XCURSOR_THEME")
     layers |= {
         "gtk3": _ini_value(CONFIG / "gtk-3.0" / "settings.ini", "gtk-cursor-theme-name"),
         "gtk4": _ini_value(CONFIG / "gtk-4.0" / "settings.ini", "gtk-cursor-theme-name"),
@@ -324,7 +326,7 @@ def _render_mango(theme: str, size: int, hide_typing: bool, hide_ms: int, config
 
 
 # One entry per compositor whose own cursor has to be set separately from the
-# four portable layers. Adding a compositor is adding a row here, not a new
+# five portable layers. Adding a compositor is adding a row here, not a new
 # write path: `_apply_compositor` and `_read_compositor` are the only code.
 COMPOSITORS = {
     "niri": {
@@ -538,6 +540,22 @@ def _apply_gsettings(theme: str, size: int) -> dict:
     return {"ok": True}
 
 
+def _apply_flatpak(theme: str, size: int) -> dict:
+    # The sandbox mounts the host's icon dirs under /run/host and leaves
+    # XCURSOR_PATH empty, so without this every Flatpak app falls back to the
+    # runtime's Adwaita. One global user override; the CLI merges its keyfile.
+    if not shutil.which("flatpak"):
+        return {"ok": False, "reason": "flatpak not installed"}
+    xcursor_path = f"/run/host/user-share/icons:{HOME / '.icons'}:/run/host/share/icons"
+    proc = subprocess.run(["flatpak", "override", "--user", "--filesystem=~/.icons:ro",
+                           f"--env=XCURSOR_PATH={xcursor_path}",
+                           f"--env=XCURSOR_THEME={theme}", f"--env=XCURSOR_SIZE={size}"],
+                          capture_output=True, text=True, timeout=10)
+    if proc.returncode != 0:
+        return {"ok": False, "reason": proc.stderr.strip()}
+    return {"ok": True, "note": "applies to Flatpak apps started from now on"}
+
+
 def _apply_gtk(theme: str, size: int) -> dict:
     written = []
     for version in ("3.0", "4.0"):
@@ -652,10 +670,11 @@ def apply_theme(theme: str, size: int, hide_typing: bool, hide_ms: int) -> dict:
         "gtk": _apply_gtk(theme, size),
         "xdg_default": _apply_xdg_default(theme),
         "environment": _apply_environment(theme, size),
+        "flatpak": _apply_flatpak(theme, size),
     }
     # Under a supported compositor its own cursor is the one the user sees on
     # the desktop, so every detected one has to land. With none configured the
-    # four portable layers still change the cursor and decide on their own.
+    # five portable layers still change the cursor and decide on their own.
     ok = (all(layers[name]["ok"] for name in detected) if detected
           else any(layer["ok"] for layer in layers.values()))
     return {"ok": ok, "theme": theme, "size": size, "layers": layers, "sizes": sizes}

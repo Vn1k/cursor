@@ -55,17 +55,24 @@ Image work (`wand`, `win2xcur`) is imported **lazily inside functions**, so
 `list`, `current` and `apply` still work on a box without ImageMagick. Keep those
 imports local; a top-level import would break the common path.
 
-### Applying: four portable layers plus every compositor found
+### Applying: five portable layers plus every compositor found
 
 `apply_theme()` fans one theme+size out to gsettings, GTK 3/4 ini,
-`~/.icons/default/index.theme` and `environment.d`, plus one layer per entry in
+`~/.icons/default/index.theme`, `environment.d` and a global user Flatpak
+override, plus one layer per entry in
 `COMPOSITORS` whose config file exists. All of the detected compositor layers
-must succeed for the overall `ok`; with none configured the four portable layers
+must succeed for the overall `ok`; with none configured the five portable layers
 decide instead. The rest are best-effort and report their own reason.
 `read_current()` reads the same set back and sets `consistent`, which is the
 drift warning the panel shows; that disagreement is the bug this plugin exists to
 fix. An **undetected compositor contributes no key at all** to `layers` — a key
 holding `""` would make `consistent` permanently false.
+
+The Flatpak layer exists because the sandbox mounts host icons only under
+`/run/host/{user-share,share}/icons` and leaves `XCURSOR_PATH` empty, so a
+Flatpak app never finds a user theme and draws Adwaita. `flatpak override
+--user` (no app id) sets `XCURSOR_PATH`/`THEME`/`SIZE` and mounts `~/.icons`
+read-only; the CLI merges the keyfile, so the engine never writes it itself.
 
 Every compositor with a config gets written, not just the running one: it keeps
 the theme right across a compositor switch, and the reload argv are best-effort,

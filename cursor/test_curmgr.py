@@ -564,6 +564,25 @@ def test_no_gsettings_is_not_drift():
         assert state["theme"] == "Adwaita", state
 
 
+def test_apply_writes_flatpak_override():
+    """Inside the sandbox host icons live under /run/host and XCURSOR_PATH is
+    empty, so Flatpak apps drew Adwaita whatever theme was applied."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        fake = home / "fakebin"
+        fake.mkdir()
+        argv = home / "flatpak-argv"
+        (fake / "flatpak").write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{argv}"\n')
+        (fake / "flatpak").chmod(0o755)
+        result = run(["apply", "Adwaita", "--size", "32"], home=home,
+                     path=f"{fake}{os.pathsep}{os.environ['PATH']}")
+        assert result["layers"]["flatpak"]["ok"], result["layers"]["flatpak"]
+        args = argv.read_text().splitlines()
+        assert args[:2] == ["override", "--user"], args
+        assert "--env=XCURSOR_THEME=Adwaita" in args and "--env=XCURSOR_SIZE=32" in args, args
+        assert any(a.startswith("--env=XCURSOR_PATH=/run/host/user-share/icons") for a in args), args
+
+
 def test_preview_rerenders_after_a_reinstall_from_older_files():
     """The strip cache compared mtimes, which install's copytree keeps, so a
     same-name reinstall from older files kept the old strip. A dangling alias
@@ -841,7 +860,7 @@ def test_apply_comments_out_a_conflicting_cursor_block():
 
 
 def test_apply_without_a_compositor_still_ok():
-    """No compositor config at all: the four portable layers carry it."""
+    """No compositor config at all: the five portable layers carry it."""
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
         result = run(["apply", "Adwaita", "--size", "32"], home=home)
