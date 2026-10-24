@@ -34,7 +34,7 @@ tags = ["panel", "shortcut", "theming", "utility"]
 [[plugin]]
 id = "vn1k/app-remover"
 name = "App Remover"
-version = "1.0.0"
+version = "0.1.0"
 updated_at = 1792865977
 added_at = 1792865977
 author = "Vn1k"

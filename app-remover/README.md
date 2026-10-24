@@ -89,6 +89,55 @@ are locked.
 | `flatpak_delete_data` | `bool` | `false` | Where "Also delete the Flatpak apps' own data" starts. |
 | `engine_path` | `string` | empty | Run another `appmgr` instead of the bundled one. |
 
+## Other distros
+
+App Remover removes **rpm** packages through dnf (Fedora and its relatives) and
+**Flatpak** apps on any distro, plus launchers no package owns. On Debian,
+Ubuntu, Arch and others the panel lists your Flatpak apps and launchers only.
+
+Support for another package manager is written from that system's real
+output, so if you would like it on yours, open an issue at
+[github.com/Vn1k/cursor](https://github.com/Vn1k/cursor/issues/new) titled
+`app-remover: support <your distro>` and paste what this prints. It only
+reads: no `sudo`, nothing is installed or removed (`apt-get -s`,
+`pacman --print` and `dnf --assumeno` are all dry runs), and it looks at
+system files only, never your home folder. Read the output before you paste
+it all the same. In fish, run `bash` first.
+
+```sh
+LC_ALL=C bash <<'EOF' 2>&1
+. /etc/os-release; echo "distro: $ID $VERSION_ID (like: ${ID_LIKE:-none})"
+for t in dpkg apt-get rpm dnf pacman zypper xbps-query apk eopkg flatpak snap; do
+  command -v "$t" >/dev/null && echo "has: $t"
+done
+f=$(ls /usr/share/applications/*.desktop 2>/dev/null | head -n 1); f=${f:-/bin/sh}
+echo "launcher: $f"
+if command -v dpkg >/dev/null; then
+  p=$(dpkg -S "$f" | head -n 1 | cut -d: -f1); echo "owner: $p"
+  dpkg-query -W -f='size: ${Installed-Size} KiB\n' "$p"
+  echo "--- apt-get -s remove $p"; apt-get -s remove "$p" | head -n 40
+  echo "--- manual"; apt-mark showmanual | head -n 5
+  echo "--- essential"; dpkg-query -W -f='${Package} ${Essential}\n' | awk '$2 == "yes" {print $1}' | head -n 10
+elif command -v pacman >/dev/null; then
+  p=$(pacman -Qoq "$f" | head -n 1); echo "owner: $p"
+  pacman -Qi "$p" | grep -E '^(Name|Installed Size)'
+  echo "--- pacman -Rsc --print $p"; pacman -Rsc --print --noconfirm "$p" </dev/null | head -n 40
+  echo "--- explicit"; pacman -Qeq | head -n 5
+  echo "--- hold"; grep -E '^[[:space:]]*HoldPkg' /etc/pacman.conf
+elif command -v rpm >/dev/null; then
+  p=$(rpm -qf --qf '%{NAME}\n' "$f" | head -n 1); echo "owner: $p"
+  rpm -q --qf 'size: %{SIZE} B\n' "$p"
+  echo "--- dnf remove --assumeno $p"; dnf remove --assumeno "$p" 2>&1 | head -n 40
+fi
+EOF
+```
+
+It prints your distro, which package tools you have, which package owns the
+first launcher in `/usr/share/applications`, a dry run of removing it, and
+the lists that play the part of Fedora's groups and protected packages (see
+**What it will not remove**): packages you installed yourself, and
+`Essential: yes` (Debian) or `HoldPkg` (Arch).
+
 ## Notes
 
 **Nothing is deleted outright.** System packages go through `dnf remove`, so

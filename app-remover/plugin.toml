@@ -1,6 +1,6 @@
 id = "vn1k/app-remover"
 name = "App Remover"
-version = "1.0.0"
+version = "0.1.0"
 # The highest level any entry uses: require() of shared.luau and views/ is 22.
 plugin_api = 22
 author = "Vn1k"

@@ -334,7 +334,12 @@ Same split and contract: `bin/appmgr.py` is only the CLI, and the work lives in
 `leftovers` finds and trashes). Keep each module small rather than growing one
 file. The panel is `panel.luau` (state `S`, actions `A`) plus `views/*.luau`,
 which only read `S` and call `A`. Ported from the GTK app in
-`~/Github/app-remover-linux`, which stays as it is.
+`~/Github/app-remover-linux`, which stays as it is. Versions stay `0.y.z` until
+more than dnf is supported: a minor bump per new backend (apt, pacman), 1.0.0
+once those were tried by people on those distros. README's **Other distros**
+asks for that output with a read-only command, tested on Fedora, Debian
+(`podman run --user 65534` from `golang:1.26`) and Arch (`archlinux`); keep
+any change to it dry-run only and out of `$HOME`.
 
 - **Never `rpm -qa`.** It took 3 s on every reload. Sizes come from the same
   batched `rpm -qf --qf '%{NAME}|%{SIZE}'` that finds the owners; a file two
