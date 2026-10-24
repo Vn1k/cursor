@@ -94,7 +94,9 @@ that finishes the plugin will not show up anywhere. Give it a minute.
 noctalia msg plugins enable vn1k/cursor
 ```
 
-It now appears in Noctalia's control centre, and under Settings › Plugins.
+It now appears in Noctalia's control centre, and under Settings › Plugins. If
+you would rather have a button on the bar, add the **Cursor** widget from the
+bar's widget picker; the panel then opens right under it.
 
 ## Opening it with a keybind
 

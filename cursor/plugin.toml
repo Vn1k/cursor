@@ -1,7 +1,9 @@
 id = "vn1k/cursor"
 name = "Cursor"
-version = "1.0.6"
-plugin_api = 17
+version = "1.0.7"
+# The highest level any entry uses: require() of shared.luau is 22. The store
+# validator does not check it, so keep it in step by hand.
+plugin_api = 22
 author = "Vn1k"
 license = "MIT"
 icon = "pointer"
@@ -116,12 +118,21 @@ height = 640
 placement = "attached"
 position = "auto"
 dismiss_on_outside_click = true
+# Opened from the bar widget, drop the panel under it; from the control-centre
+# tile it still follows `position`.
+open_near_click = true
 
-# A cursor is set once and then forgotten, so it belongs in the control centre
-# rather than taking permanent space in the bar.
+# A cursor is set once and then forgotten, so the control-centre tile is the
+# main way in, and the bar button is there only for whoever wants one.
 [[shortcut]]
 id = "shortcut"
 entry = "shortcut.luau"
+
+# Makes the plugin addable from the bar's widget picker, which lists only
+# [[widget]] entries (community-plugins#880).
+[[widget]]
+id = "widget"
+entry = "widget.luau"
 
 # Headless: resets the cursor when the plugin is removed (onExit "uninstall",
 # plugin_api 17). Runs nothing otherwise.

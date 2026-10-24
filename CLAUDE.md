@@ -38,6 +38,8 @@ in step.
 
 - `cursor/bin/curmgr.py` — the engine. All filesystem and config writes live here.
 - `cursor/panel.luau` / `cursor/shortcut.luau` — UI only. Shells out to curmgr, renders JSON.
+- `cursor/widget.luau` — optional bar button that toggles the panel. The bar's widget
+  picker lists only `[[widget]]` entries, so without it the plugin could not go on a bar.
 - `cursor/shared.luau` — `shellQuote`, `configString`, `pathEnv()`; required by the panel and
   the service so both hand the engine the same paths.
 - `cursor/service.luau` — headless `[[service]]` whose only job is `onExit(_, "uninstall")`:
@@ -46,7 +48,10 @@ in step.
   `pluginDataDir()` on every start and the hook runs that copy, detached. The result goes to
   `<data>/curmgr.py.uninstall.json`. A plugin removed while already disabled gets no `onExit`,
   which is why the panel keeps its **Reset to system cursor** button. This needs
-  `plugin_api = 17` (`service-lifecycle`).
+  `service-lifecycle` (level 17).
+- `plugin_api` is the highest level any entry uses, currently **22** for `require()` of
+  `shared.luau` (`module-require`). The store validator checks only some features (not
+  `require`), so check new APIs against `docs/plugin-api.json` in the noctalia repo.
 - `cursor/plugin.toml` — Noctalia manifest (panel, control-centre tile, settings keys).
 - `cursor/translations/{en,id}.json` — every UI string. Single-segment keys are flat;
   anything dotted (the `settings.*` keys `plugin.toml` references) is **nested
