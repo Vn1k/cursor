@@ -30,7 +30,7 @@ binds {
 """
 
 
-def run(args, home=None, expect_ok=True, path=None):
+def run(args, home=None, expect_ok=True, path=None, extra_env=None):
     env = dict(os.environ)
     if path is not None:
         env["PATH"] = path
@@ -42,6 +42,7 @@ def run(args, home=None, expect_ok=True, path=None):
                    XDG_DATA_HOME=str(home / ".local/share"),
                    XDG_CACHE_HOME=str(home / ".cache"),
                    GSETTINGS_BACKEND="memory")
+    env.update(extra_env or {})
     proc = subprocess.run([sys.executable, str(CURMGR), *args],
                           capture_output=True, text=True, env=env)
     payload = json.loads(proc.stdout)
@@ -841,6 +842,92 @@ def test_apply_writes_every_layer():
         for layer in ("niri", "gtk3", "gtk4", "xdg_default", "environment"):
             assert state["layers"][layer] == "Adwaita", (layer, state["layers"])
 
+
+
+def bare_theme(root):
+    """Enough of a theme for `list`: a cursors/ dir holding one file."""
+    (root / "cursors").mkdir(parents=True)
+    (root / "cursors" / "left_ptr").write_bytes(b"Xcur")
+    return root
+
+
+def test_list_reads_xdg_data_dirs():
+    """#996: NixOS has no /usr/share/icons; its themes are only on XDG_DATA_DIRS."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        bare_theme(home / "profile/share/icons/NixTheme")
+        result = run(["list"], home=home,
+                     extra_env={"XDG_DATA_DIRS": f"{home}/missing:{home}/profile/share"})
+        names = [t["name"] for t in result["themes"]]
+        assert "NixTheme" in names, names
+        nix = next(t for t in result["themes"] if t["name"] == "NixTheme")
+        assert not nix["removable"], "a profile theme is not ours to delete"
+
+
+def test_icon_dirs_setting():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        bare_theme(home / "elsewhere/Extra")
+        env = {"CURMGR_ICON_DIRS": f"{home}/nope:{home}/elsewhere"}
+        names = [t["name"] for t in run(["list"], home=home, extra_env=env)["themes"]]
+        assert "Extra" in names, names
+
+
+def test_apply_survives_readonly_gtk():
+    """#996: Home Manager's read-only settings.ini fails that layer, not the apply."""
+    if os.geteuid() == 0:
+        return  # root writes through 0444
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        niri_dir = home / ".config/niri"
+        niri_dir.mkdir(parents=True)
+        (niri_dir / "config.kdl").write_text(MINIMAL_NIRI)
+        (home / ".config/gtk-3.0").mkdir(parents=True)
+        store = home / "store-settings.ini"
+        store.write_text("[Settings]\n")
+        store.chmod(0o444)
+        (home / ".config/gtk-3.0/settings.ini").symlink_to(store)
+        result = run(["apply", "Adwaita"], home=home)
+        layers = result["layers"]
+        assert not layers["gtk"]["ok"] and "ermission" in layers["gtk"]["reason"], layers["gtk"]
+        assert layers["niri"]["ok"] and layers["environment"]["ok"], layers
+        assert store.read_text() == "[Settings]\n"
+
+
+def test_install_dir_setting():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        src = make_theme(home / "src" / "demo-cursor-linux")
+        env = {"CURMGR_INSTALL_DIR": str(home / "my-icons")}
+        result = run(["install", str(src)], home=home, extra_env=env)
+        assert result["path"] == str(home / "my-icons"), result
+        assert (home / "my-icons/Demo-Theme/cursors/default").is_symlink()
+        theme = next(t for t in run(["list"], home=home, extra_env=env)["themes"]
+                     if t["name"] == "Demo-Theme")
+        assert theme["removable"], theme
+        run(["remove", "Demo-Theme"], home=home, extra_env=env)
+        assert not (home / "my-icons/Demo-Theme").exists()
+        # Remove rmtree's inside it, so it may never leave $HOME or be $HOME.
+        for outside in ("/usr/share/icons", str(home)):
+            result = run(["list"], home=home, expect_ok=False,
+                         extra_env={"CURMGR_INSTALL_DIR": outside})
+            assert "home folder" in result["error"], result
+
+
+def test_compositor_config_setting():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        nix = home / "nix"
+        nix.mkdir()
+        (nix / "niri.kdl").write_text(MINIMAL_NIRI)
+        env = {"CURMGR_NIRI_CONFIG": str(nix / "niri.kdl")}
+        result = run(["apply", "Adwaita", "--size", "32"], home=home, extra_env=env)
+        assert result["layers"]["niri"]["ok"], result["layers"]["niri"]
+        assert 'xcursor-theme "Adwaita"' in (nix / "cursor.kdl").read_text()
+        assert 'include "cursor.kdl"' in (nix / "niri.kdl").read_text()
+        assert not (home / ".config/niri").exists(), "wrote the default path too"
+        state = run(["current"], home=home, extra_env=env)
+        assert state["layers"]["niri"] == "Adwaita" and state["size"] == 32, state
 
 def test_apply_comments_out_a_conflicting_cursor_block():
     with tempfile.TemporaryDirectory() as tmp:

@@ -112,6 +112,41 @@ local function engine()
   return "curmgr"
 end
 
+-- The path settings reach the engine as env vars rather than flags, so a
+-- keybind can export the same names with the shell stopped. Only the ones set
+-- are sent; an empty one leaves the engine on its XDG default.
+local PATH_SETTINGS = {
+  install_dir = "CURMGR_INSTALL_DIR",
+  niri_config = "CURMGR_NIRI_CONFIG",
+  hyprland_config = "CURMGR_HYPRLAND_CONFIG",
+  sway_config = "CURMGR_SWAY_CONFIG",
+  mango_config = "CURMGR_MANGO_CONFIG",
+}
+
+local function pathEnv()
+  local env = ""
+  for key, var in pairs(PATH_SETTINGS) do
+    local value = trim(configString(key, ""))
+    if value ~= "" then
+      env ..= `{var}={shellQuote(noctalia.expandPath(value))} `
+    end
+  end
+  local dirs = {}
+  local list = noctalia.getConfig("icon_dirs")
+  if type(list) == "table" then
+    for _, dir in ipairs(list) do
+      local d = trim(dir)
+      if d ~= "" then
+        table.insert(dirs, noctalia.expandPath(d))
+      end
+    end
+  end
+  if #dirs > 0 then
+    env ..= `CURMGR_ICON_DIRS={shellQuote(table.concat(dirs, ":"))} `
+  end
+  return env
+end
+
 local function imageArgs()
   return ` --sizes {shellQuote(configString("build_sizes", "24,32,48,64,96"))}`
     .. ` --filter {shellQuote(configString("scale_filter", "lanczos"))}`
@@ -131,7 +166,7 @@ local function call(args, done)
     done(nil, tr("engine_missing"))
     return
   end
-  noctalia.runAsync(`{engine()} {args}`, function(result)
+  noctalia.runAsync(`{pathEnv()}{engine()} {args}`, function(result)
     if result == nil then
       done(nil, tr("engine_missing"))
       return
@@ -721,7 +756,7 @@ local function buildTab()
   })
 end
 
--- Only themes under ~/.local/share/icons are ours to delete; list_themes marks
+-- Only themes in the install folder are ours to delete; list_themes marks
 -- those `removable`, so system themes simply never appear here.
 local function removableRows()
   local rows = {}

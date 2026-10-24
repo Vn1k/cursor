@@ -66,7 +66,7 @@ curmgr apply Bibata-Modern-Ice --size 32      # write all five layers
 curmgr install ~/Downloads/Miku-Cursor        # finished Xcursor theme -> installed
 curmgr import-win ~/Downloads/MyPack         # Windows pack -> Xcursor theme
 curmgr build ~/art/mycursor --name MyCursor   # your PNGs -> Xcursor theme
-curmgr remove MyCursor                        # only ever from ~/.local/share/icons
+curmgr remove MyCursor                        # only ever from the install folder
 ```
 
 `apply` also takes `--hide-when-typing` and `--hide-after-inactive-ms N`.

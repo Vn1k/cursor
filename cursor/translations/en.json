@@ -98,6 +98,30 @@
         "point": "Point (pixel art)",
         "mitchell": "Mitchell (balanced)"
       }
+    },
+    "icon_dirs": {
+      "label": "Extra theme folders",
+      "description": "Also look for cursor themes here. ~/.local/share/icons, ~/.icons, $XCURSOR_PATH and $XDG_DATA_DIRS are always searched."
+    },
+    "install_dir": {
+      "label": "Install folder",
+      "description": "Where imported, built and installed themes go, and the only folder Remove deletes from. Must be inside your home folder, and somewhere your apps look for cursors. Leave empty for ~/.local/share/icons."
+    },
+    "niri_config": {
+      "label": "niri config",
+      "description": "Leave empty for ~/.config/niri/config.kdl. cursor.kdl is written beside it."
+    },
+    "hyprland_config": {
+      "label": "Hyprland config",
+      "description": "Leave empty for ~/.config/hypr/hyprland.conf. cursor.conf is written beside it."
+    },
+    "sway_config": {
+      "label": "Sway config",
+      "description": "Leave empty for ~/.config/sway/config. cursor.conf is written beside it."
+    },
+    "mango_config": {
+      "label": "MangoWC config",
+      "description": "Leave empty for ~/.config/mango/config.conf. cursor.conf is written beside it."
     }
   }
 }

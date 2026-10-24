@@ -26,8 +26,35 @@ CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config")
 DATA = Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local" / "share")
 CACHE = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache")
 
-USER_ICONS = DATA / "icons"
-ICON_DIRS = [USER_ICONS, HOME / ".icons", Path("/usr/share/icons")]
+
+def _env_path(var: str, default: Path) -> Path:
+    """A path the panel's settings may override. The panel exports only the
+    settings that are set, so an unset var keeps the XDG default - and a
+    keybind can export the same names with the shell stopped."""
+    value = os.environ.get(var, "").strip()
+    return Path(value).expanduser() if value else default
+
+
+def _env_dirs(var: str, suffix: str = "") -> list[Path]:
+    return [Path(d).expanduser() / suffix for d in os.environ.get(var, "").split(":") if d]
+
+
+# Where themes are installed, and the only place `remove` may delete from;
+# main() refuses one that is not inside $HOME.
+# ponytail: an install dir outside Xcursor's search path (and outside ~/.icons,
+# which is all the Flatpak layer mounts) is listed here but unseen by apps.
+# Writing it into XCURSOR_PATH via environment.d would close that if it bites.
+USER_ICONS = _env_path("CURMGR_INSTALL_DIR", DATA / "icons")
+# Xcursor's own lookup order, so the first theme of a name here is the one apps
+# load. XDG_DATA_DIRS and XCURSOR_PATH are how NixOS and Guix expose their
+# profiles' themes; a fixed /usr/share/icons found none there.
+ICON_DIRS = list(dict.fromkeys([
+    USER_ICONS, DATA / "icons", HOME / ".icons",
+    *_env_dirs("CURMGR_ICON_DIRS"),
+    *_env_dirs("XCURSOR_PATH"),
+    *(_env_dirs("XDG_DATA_DIRS", "icons") if os.environ.get("XDG_DATA_DIRS")
+      else [Path("/usr/local/share/icons"), Path("/usr/share/icons")]),
+]))
 ENV_CONF = CONFIG / "environment.d" / "90-xcursor.conf"
 PREVIEW_DIR = CACHE / "curmgr" / "preview"
 # Rendered source files from the last scan, so the panel's mapping grid can
@@ -325,13 +352,19 @@ def _render_mango(theme: str, size: int, hide_typing: bool, hide_ms: int, config
     ]) + "\n"
 
 
+NIRI_CONFIG = _env_path("CURMGR_NIRI_CONFIG", CONFIG / "niri" / "config.kdl")
+HYPRLAND_CONFIG = _env_path("CURMGR_HYPRLAND_CONFIG", CONFIG / "hypr" / "hyprland.conf")
+SWAY_CONFIG = _env_path("CURMGR_SWAY_CONFIG", CONFIG / "sway" / "config")
+MANGO_CONFIG = _env_path("CURMGR_MANGO_CONFIG", CONFIG / "mango" / "config.conf")
+
 # One entry per compositor whose own cursor has to be set separately from the
 # five portable layers. Adding a compositor is adding a row here, not a new
 # write path: `_apply_compositor` and `_read_compositor` are the only code.
 COMPOSITORS = {
     "niri": {
-        "config": CONFIG / "niri" / "config.kdl",
-        "include_file": CONFIG / "niri" / "cursor.kdl",
+        "config": NIRI_CONFIG,
+        # Beside the config, wherever the settings put it: niri's include is relative.
+        "include_file": NIRI_CONFIG.parent / "cursor.kdl",
         "include_line": 'include "cursor.kdl"',
         "comment": "//",
         "render": _render_niri,
@@ -349,8 +382,8 @@ COMPOSITORS = {
         "ms_scale": 1,
     },
     "hyprland": {
-        "config": CONFIG / "hypr" / "hyprland.conf",
-        "include_file": CONFIG / "hypr" / "cursor.conf",
+        "config": HYPRLAND_CONFIG,
+        "include_file": HYPRLAND_CONFIG.parent / "cursor.conf",
         "include_line": "source = {file}",
         "comment": "#",
         "render": _render_hyprland,
@@ -369,8 +402,8 @@ COMPOSITORS = {
         "ms_scale": 1000,
     },
     "sway": {
-        "config": CONFIG / "sway" / "config",
-        "include_file": CONFIG / "sway" / "cursor.conf",
+        "config": SWAY_CONFIG,
+        "include_file": SWAY_CONFIG.parent / "cursor.conf",
         "include_line": "include {file}",
         "comment": "#",
         "render": _render_sway,
@@ -384,8 +417,8 @@ COMPOSITORS = {
         "ms_scale": 1,
     },
     "mango": {
-        "config": CONFIG / "mango" / "config.conf",
-        "include_file": CONFIG / "mango" / "cursor.conf",
+        "config": MANGO_CONFIG,
+        "include_file": MANGO_CONFIG.parent / "cursor.conf",
         "include_line": "source={file}",
         "comment": "#",
         "render": _render_mango,
@@ -659,18 +692,28 @@ def ensure_sizes(root: Path, size: int) -> dict:
     return {"added": sorted(added)}
 
 
+def _layer(apply, *args) -> dict:
+    """One layer's result, never an exception. Home Manager makes settings.ini a
+    read-only store symlink: that layer fails on its own while the rest - the
+    compositor already written - still land and say so."""
+    try:
+        return apply(*args)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "reason": str(exc)}
+
+
 def apply_theme(theme: str, size: int, hide_typing: bool, hide_ms: int) -> dict:
     root = find_theme(theme)  # fail fast on a typo before touching any config
     sizes = ensure_sizes(root, size)
     detected = detected_compositors()
-    layers = {name: _apply_compositor(name, spec, theme, size, hide_typing, hide_ms)
+    layers = {name: _layer(_apply_compositor, name, spec, theme, size, hide_typing, hide_ms)
               for name, spec in detected.items()}
     layers |= {
-        "gsettings": _apply_gsettings(theme, size),
-        "gtk": _apply_gtk(theme, size),
-        "xdg_default": _apply_xdg_default(theme),
-        "environment": _apply_environment(theme, size),
-        "flatpak": _apply_flatpak(theme, size),
+        "gsettings": _layer(_apply_gsettings, theme, size),
+        "gtk": _layer(_apply_gtk, theme, size),
+        "xdg_default": _layer(_apply_xdg_default, theme),
+        "environment": _layer(_apply_environment, theme, size),
+        "flatpak": _layer(_apply_flatpak, theme, size),
     }
     # Under a supported compositor its own cursor is the one the user sees on
     # the desktop, so every detected one has to land. With none configured the
@@ -1398,6 +1441,11 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        # `remove` rmtree's inside the install dir, so a setting may move it
+        # but never out of $HOME, nor onto $HOME itself.
+        if os.environ.get("CURMGR_INSTALL_DIR", "").strip() and (
+                not _is_under(USER_ICONS, HOME) or USER_ICONS.resolve() == HOME.resolve()):
+            raise Fail(f"install folder must be inside your home folder: {USER_ICONS}")
         if args.cmd == "list":
             result = {"ok": True, "themes": list_themes()}
         elif args.cmd == "current":

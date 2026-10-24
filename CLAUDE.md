@@ -51,6 +51,16 @@ caught centrally in `main()`. The Luau side treats a non-table decode as "engine
 missing or broken", never as a bad request — so never print progress, warnings or
 partial output to stdout from curmgr.
 
+Paths the user can move come in as **env vars**, never flags: `CURMGR_ICON_DIRS`
+(`:`-joined), `CURMGR_INSTALL_DIR` and `CURMGR_{NIRI,HYPRLAND,SWAY,MANGO}_CONFIG`.
+The panel's `pathEnv()` exports only the settings that are set, so an unset one
+leaves the engine on its XDG default, and a keybind can export the same names.
+They are read once at import (`_env_path()`), so the module constants
+`USER_ICONS`, `ICON_DIRS` and the `COMPOSITORS` rows already hold the result.
+Each compositor's include file sits beside its config, wherever that is.
+`ICON_DIRS` follows Xcursor's lookup order and includes `$XCURSOR_PATH` and
+`$XDG_DATA_DIRS/icons`: on NixOS and Guix, those are the only places themes live.
+
 Image work (`wand`, `win2xcur`) is imported **lazily inside functions**, so
 `list`, `current` and `apply` still work on a box without ImageMagick. Keep those
 imports local; a top-level import would break the common path.
@@ -62,7 +72,11 @@ imports local; a top-level import would break the common path.
 override, plus one layer per entry in
 `COMPOSITORS` whose config file exists. All of the detected compositor layers
 must succeed for the overall `ok`; with none configured the five portable layers
-decide instead. The rest are best-effort and report their own reason.
+decide instead. The rest are best-effort and report their own reason. Every
+layer runs through `_layer()`, which turns an `OSError` into that layer's
+`{"ok": false, "reason"}`: a read-only file (Home Manager's `settings.ini`)
+fails one layer, never the whole apply after the compositor has already been
+written.
 `read_current()` reads the same set back and sets `consistent`, which is the
 drift warning the panel shows; that disagreement is the bug this plugin exists to
 fix. An **undetected compositor contributes no key at all** to `layers` — a key
@@ -213,4 +227,6 @@ Note that `noctalia msg config-reload` reloads the Luau script but **not**
   accepting a limit.
 - Binary format work is delegated entirely to `win2xcur`. Nothing here parses
   `.cur`, `.ani` or Xcursor by hand — keep it that way.
-- `remove` and cleanup only ever touch `~/.local/share/icons` (`_is_under` guard).
+- `remove` and cleanup only ever touch the install folder (`USER_ICONS`, default
+  `~/.local/share/icons`, `_is_under` guard). `main()` refuses a `CURMGR_INSTALL_DIR`
+  outside `$HOME`, or one equal to it.

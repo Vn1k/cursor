@@ -170,6 +170,12 @@ In Noctalia's settings, under Plugins › Cursor.
 | Built sizes | `24,32,48,64,96` | Which sizes get baked into themes you import or build. Fewer is faster and smaller; add `128` if you have a HiDPI screen. |
 | Resampling | `lanczos` | How artwork is scaled. `point` keeps pixel art sharp, which suits older Windows packs; `lanczos` suits smooth modern ones; `mitchell` is in between. |
 | Engine path | empty | Leave it empty. Only needed if you moved the engine somewhere unusual. |
+| Extra theme folders | empty | More folders to look for cursor themes in. `~/.local/share/icons`, `~/.icons`, `$XCURSOR_PATH` and `$XDG_DATA_DIRS/icons` are always searched. |
+| Install folder | `~/.local/share/icons` | Where imported, built and installed themes go, and the only place **Remove** deletes from. It must be inside your home folder, and somewhere your apps look for cursors. |
+| niri / Hyprland / Sway / MangoWC config | `~/.config/…` | The compositor's main config, if yours lives elsewhere. The managed `cursor.kdl` / `cursor.conf` is written next to it. |
+
+From a keybind or script, the same paths are the env vars `CURMGR_ICON_DIRS`,
+`CURMGR_INSTALL_DIR` and `CURMGR_{NIRI,HYPRLAND,SWAY,MANGO}_CONFIG`.
 
 ## If something looks wrong
 
@@ -181,6 +187,14 @@ missing. Everything else keeps working.
 
 **Import or Build gives an error.** `win2xcur` is missing —
 `pip install --user win2xcur`.
+
+**No themes listed on NixOS or Guix.** Themes from your profiles are found
+through `XDG_DATA_DIRS` and `XCURSOR_PATH`. If yours are somewhere neither
+lists, add the folder under **Extra theme folders**.
+
+**One layer says permission denied.** That file is read-only — on NixOS, Home
+Manager owns `gtk-3.0/settings.ini`. The other layers are still applied; set
+the cursor for that one in your Home Manager config.
 
 **The cursor did not change in an app.** If it was already open, it keeps the
 cursor it started with. Restart it.
