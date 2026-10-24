@@ -1,0 +1,101 @@
+id = "vn1k/app-remover"
+name = "App Remover"
+version = "1.0.0"
+# The highest level any entry uses: require() of shared.luau and views/ is 22.
+plugin_api = 22
+author = "Vn1k"
+license = "MIT"
+icon = "trash"
+description = "Uninstall rpm and Flatpak apps from a panel: see everything a removal takes before the password, then clean up what it left behind."
+tags = ["panel", "shortcut", "system", "utility"]
+
+# bin/appmgr.py does every lookup and removal with the standard library. dnf
+# and flatpak are each optional: whichever is missing is simply not listed.
+# gio (glib2) moves leftovers to the Trash.
+dependencies = ["python3"]
+
+[[setting]]
+key = "default_view"
+type = "select"
+label_key = "settings.default_view.label"
+description_key = "settings.default_view.description"
+default = "apps"
+options = [
+  { value = "apps", label_key = "settings.default_view.option.apps" },
+  { value = "packages", label_key = "settings.default_view.option.packages" },
+]
+
+[[setting]]
+key = "show_unpackaged"
+type = "bool"
+label_key = "settings.show_unpackaged.label"
+description_key = "settings.show_unpackaged.description"
+default = true
+
+# Exported as APPMGR_PROTECTED. Warning only: dnf's protected_packages is the
+# hard floor under it.
+[[setting]]
+key = "protected_packages"
+type = "string_list"
+label_key = "settings.protected_packages.label"
+description_key = "settings.protected_packages.description"
+default = ["kernel", "kernel-core", "systemd", "glibc", "dnf5", "dnf", "rpm", "niri", "noctalia", "noctalia-shell", "bash", "coreutils", "polkit", "sudo"]
+
+[[setting]]
+key = "big_transaction"
+type = "int"
+label_key = "settings.big_transaction.label"
+description_key = "settings.big_transaction.description"
+default = 10
+min = 1
+max = 1000
+
+# Exported as APPMGR_LEFTOVER_DIRS; the engine ignores anything outside $HOME.
+[[setting]]
+key = "leftover_dirs"
+type = "string_list"
+label_key = "settings.leftover_dirs.label"
+description_key = "settings.leftover_dirs.description"
+default = []
+
+# Exported as APPMGR_ELEVATE. Only dnf needs it; flatpak asks polkit itself.
+[[setting]]
+key = "elevate_command"
+type = "string"
+label_key = "settings.elevate_command.label"
+description_key = "settings.elevate_command.description"
+default = ""
+
+[[setting]]
+key = "flatpak_delete_data"
+type = "bool"
+label_key = "settings.flatpak_delete_data.label"
+description_key = "settings.flatpak_delete_data.description"
+default = false
+
+[[setting]]
+key = "engine_path"
+type = "string"
+label_key = "settings.engine_path.label"
+description_key = "settings.engine_path.description"
+default = ""
+
+[[panel]]
+id = "manager"
+entry = "panel.luau"
+width = 760
+height = 620
+placement = "attached"
+position = "auto"
+dismiss_on_outside_click = true
+open_near_click = true
+
+[[shortcut]]
+id = "shortcut"
+entry = "shortcut.luau"
+
+# Makes the plugin addable from the bar's widget picker, which lists only
+# [[widget]] entries.
+[[widget]]
+id = "widget"
+entry = "widget.luau"

@@ -30,3 +30,17 @@ description = "Pick, preview and install icon themes, browse gnome-look.org, and
 deprecated = false
 plugin_api = 22
 tags = ["panel", "shortcut", "theming", "utility"]
+
+[[plugin]]
+id = "vn1k/app-remover"
+name = "App Remover"
+version = "1.0.0"
+updated_at = 1792865977
+added_at = 1792865977
+author = "Vn1k"
+license = "MIT"
+icon = "trash"
+description = "Uninstall rpm and Flatpak apps from a panel: see everything a removal takes before the password, then clean up what it left behind."
+deprecated = false
+plugin_api = 22
+tags = ["panel", "shortcut", "system", "utility"]

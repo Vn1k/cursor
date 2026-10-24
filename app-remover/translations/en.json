@@ -1,0 +1,115 @@
+{
+  "title": "App Remover",
+  "reload": "Refresh",
+  "close": "Close",
+  "loading": "Finding installed apps…",
+  "error": "Something went wrong",
+  "engine_missing": "The remover engine did not answer. Check that python3 is installed, or clear Engine path in the plugin settings.",
+  "engine_timeout": "The remover engine took longer than a minute and was stopped. Refresh to try again.",
+  "elevate_missing": "{command} is not installed, so there is no way to ask for your password. Install it, or pick another command in the plugin settings.",
+
+  "search_apps": "Search apps",
+  "search_packages": "Search packages",
+  "mode_apps": "Apps",
+  "mode_packages": "All packages",
+  "source_all": "All sources",
+  "source_rpm": "rpm",
+  "source_flatpak": "Flatpak",
+  "not_packaged": "No package",
+  "col_name": "Name",
+  "col_type": "Type",
+  "col_size": "Size",
+  "launchers": "{n} launchers",
+  "show_more": "Show {n} more",
+  "no_match_apps": "No app matches “{query}”. All packages also searches command-line tools and fonts.",
+  "no_match": "Nothing matches “{query}”.",
+  "nothing_listed": "Nothing to show. Refresh, or switch to All packages.",
+  "skipped_rpm": "rpm and dnf are not installed here, so only Flatpak apps are listed.",
+  "skipped_flatpak": "Flatpak is not installed here, so only rpm packages are listed.",
+  "ledger_empty": "Select what you want to remove",
+  "ledger_one": "1 app picked, {size} back",
+  "ledger_many": "{n} apps picked, {size} back",
+  "clear": "Clear",
+  "review": "Review removal",
+
+  "step_pick": "Pick",
+  "step_review": "Review",
+  "step_remove": "Remove",
+  "step_clean": "Clean up",
+  "resolving": "Asking dnf what this removes…",
+  "picked_heading": "You picked {n}",
+  "dependent_heading": "Also removed: {n} that need what you picked",
+  "dependent_hint": "These stop working without it, so dnf takes them too.",
+  "unused_heading": "Also removed: {n} nothing else uses",
+  "unused_hint": "Libraries and data that were only there for what you picked.",
+  "risk_protected": "This removes {names}. Your system may not start or log in afterwards.",
+  "risk_big": "This removes {n} packages you picked or that need them, more than {limit} (the Big removal setting). Check the second group: those are other apps that stop working.",
+  "delete_data": "Also delete the Flatpak apps' own data",
+  "delete_data_hint": "Their settings and files under ~/.var/app. Off keeps them, in case you reinstall.",
+  "frees": "Frees about {size}",
+  "back": "Back",
+  "remove_one": "Remove 1 package",
+  "remove_many": "Remove {n} packages",
+  "remove_confirm": "Yes, remove {n} packages",
+
+  "waiting_password": "Waiting for your password",
+  "waiting_password_hint": "Removing system packages needs your password. Enter it in the prompt that just opened.",
+  "removing": "Removing…",
+  "progress_step": "{label} ({n} of {total})",
+  "show_log": "Show details",
+  "hide_log": "Hide details",
+  "cancelled": "Removal cancelled. Nothing was removed.",
+  "failed": "Removal failed: {error}",
+  "failed_names": "{names} could not be removed. The reason is in the output below.",
+  "removed_one": "Removed 1 app",
+  "removed_many": "Removed {n} apps",
+  "not_removed": "Not removed: {names}",
+  "leftovers_heading": "{n} folders left behind",
+  "leftovers_hint": "Settings and caches with the same name as what you removed. Select the ones to move to the Trash.",
+  "no_leftovers": "Nothing was left behind in your home folder.",
+  "keep_all": "Keep all",
+  "trash_one": "Move 1 folder to Trash",
+  "trash_many": "Move {n} folders to Trash",
+  "trashed_one": "Moved 1 folder to the Trash",
+  "trashed_many": "Moved {n} folders to the Trash",
+  "done": "Done",
+
+  "settings": {
+    "default_view": {
+      "label": "Open on",
+      "description": "What the panel lists when it first opens.",
+      "option": {
+        "apps": "Apps with a launcher",
+        "packages": "All installed packages"
+      }
+    },
+    "show_unpackaged": {
+      "label": "Show launchers no package owns",
+      "description": "Scripts and hand-made launchers. They are listed for completeness but cannot be removed here."
+    },
+    "protected_packages": {
+      "label": "Packages that need a warning",
+      "description": "Removing any of these, even as a dependency, turns the review red and asks twice. Clear the list to go back to the built-in one."
+    },
+    "big_transaction": {
+      "label": "Big removal",
+      "description": "Warn when a removal takes more than this many packages you picked or that need them. Libraries nothing else uses are not counted."
+    },
+    "leftover_dirs": {
+      "label": "Folders checked for leftovers",
+      "description": "Searched one level deep after a removal. Must be inside your home folder. Empty means ~/.config, ~/.local/share, ~/.local/state and ~/.cache."
+    },
+    "elevate_command": {
+      "label": "Password prompt command",
+      "description": "Runs dnf as root. Empty means pkexec, which uses whichever polkit agent is running, Noctalia's own included. run0 works too."
+    },
+    "flatpak_delete_data": {
+      "label": "Delete Flatpak app data by default",
+      "description": "Where the review's \"Also delete the Flatpak apps' own data\" starts."
+    },
+    "engine_path": {
+      "label": "Engine path",
+      "description": "Run this appmgr instead of the one inside the plugin. Leave empty."
+    }
+  }
+}

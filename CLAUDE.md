@@ -10,6 +10,8 @@ Nothing is compiled and there is no package manager, linter or CI here.
 python3 cursor/test_curmgr.py    # whole self-check
 cd cursor && python3 -c 'import test_curmgr as t; t.test_import_windows_inf_pack()'   # one test
 python3 icons/tests/test_iconmgr.py   # the icons plugin, same style
+python3 app-remover/tests/test_appmgr.py   # the app-remover plugin, same style
+noctalia plugins lint app-remover      # offline manifest/settings cross-check
 ```
 
 Installing is `noctalia msg plugins source add <name> git <url>` then
@@ -32,15 +34,16 @@ Two halves, split on purpose: **Luau cannot decode PNGs or parse cursor
 binaries**, and the tool must still work from a keybind with the shell stopped.
 
 The repo is a plugin **source**: `catalog.toml` at the root indexes it, and it
-ships two plugins, `cursor/` (`vn1k/cursor`) and `icons/` (`vn1k/icons`, see the
-end of this file). Noctalia reads the catalog with `git show HEAD:catalog.toml`,
+ships three plugins, `cursor/` (`vn1k/cursor`), `icons/` (`vn1k/icons`) and
+`app-remover/` (`vn1k/app-remover`); the last two are described at the end of
+this file. Noctalia reads the catalog with `git show HEAD:catalog.toml`,
 so a bump only lands once pushed — and `version` and `plugin_api` therefore live
 in two files, `catalog.toml` and `<plugin>/plugin.toml`. Keep them in step.
 
-This repo is where both are developed. The community-plugins fork
+This repo is where all three are developed. The community-plugins fork
 (`~/Github/community-plugins`) only ever receives the final copy of a plugin
 directory at release time, without its tests (`cursor/test_curmgr.py`,
-`icons/tests/`); the fork's own `README.md` is maintained there.
+`icons/tests/`, `app-remover/tests/`); the fork's own `README.md` is maintained there.
 
 - `cursor/bin/curmgr.py` — the engine. All filesystem and config writes live here.
 - `cursor/panel.luau` / `cursor/shortcut.luau` — UI only. Shells out to curmgr, renders JSON.
@@ -322,3 +325,65 @@ files and nothing is rasterised.
   the state in the `key` (theme rows, swatches, result rows) and give every
   view and action bar its own key.
 
+## The app-remover plugin (`app-remover/`)
+
+Same split and contract: `bin/appmgr.py` is only the CLI, and the work lives in
+`bin/remover/`, one module per concern (`config` reads every env var once,
+`entries` parses `.desktop` files with `configparser`, `rpm`, `flatpak`,
+`inventory` builds and caches the list, `jobs` previews and removes,
+`leftovers` finds and trashes). Keep each module small rather than growing one
+file. The panel is `panel.luau` (state `S`, actions `A`) plus `views/*.luau`,
+which only read `S` and call `A`. Ported from the GTK app in
+`~/Github/app-remover-linux`, which stays as it is.
+
+- **Never `rpm -qa`.** It took 3 s on every reload. Sizes come from the same
+  batched `rpm -qf --qf '%{NAME}|%{SIZE}'` that finds the owners; a file two
+  packages own breaks the one-line-per-path alignment, and `rpm.owners()`
+  halves the batch until it lines up again.
+- **The list cache is keyed on its inputs** (every launcher's mtime, the rpm
+  database files minus `-shm`, the flatpak `app/` dirs), so a hit is always
+  current. Bump `CACHE_VERSION` when an item's shape changes.
+- **A user copy of a launcher is owned by no package.** `entries.files()` keeps
+  the system files it shadows, and the owner lookup falls back to them;
+  without that, every launcher edited with MenuLibre showed as unpackaged.
+- **Names reach dnf and flatpak only from the inventory.** `inventory.lookup()`
+  refuses any key not in today's list, and `jobs._split()` re-checks the name
+  shape; `trash` only takes a directory sitting directly in a leftover root,
+  and roots outside `$HOME` are dropped in `config`.
+- **The removal is detached.** Noctalia's polkit agent is a panel of its own and
+  only one panel is open at a time, so the password prompt closes ours; dnf can
+  also outlast runAsync's 60 s. The engine writes `pluginDataDir()/remove.json`,
+  and `onOpen`/`update()` pick the answer up. The panel comes back twice over:
+  the engine runs `noctalia msg panel-open` itself at dnf's first output line
+  (`--reopen`; pkexec only starts dnf once the password is accepted), so the
+  progress shows while it runs, and the shell runs it again after the engine
+  exits (`;`, not `&&`) for a cancelled prompt, where dnf never starts.
+  pkexec exits 126/127 when the prompt is dismissed: reported as cancelled,
+  and the Flatpak steps are skipped.
+- **dnf's output is a terminal progress bar** (`100% | 250.0 B/s | ...`), so
+  the panel never shows it as the main view. `jobs.progress()` reads the
+  `[n/N]` counter and the package into the state file, the panel draws a
+  `ui.progress` from it, and the raw log sits behind Show details (shown
+  without asking only when the removal failed). A `ui.scroll` with a fixed
+  `height` kept the size of its first one-line render: the log uses `flexGrow`.
+- **Every Luau callback gets 25 ms of CPU** (`kCallBudget`), and building plus
+  reconciling the tree counts. Five timeouts in a minute mark the runtime
+  unhealthy until the plugin is disabled and enabled again. So: at most `PAGE`
+  (40) rows per render, translations looked up once per render, and
+  `noctalia.appIconPath` (a few ms each) runs only in `onFrameTick`, under a
+  6 ms slice, never inside a render. The redraw gets a frame of its own.
+- **The list is a table.** Every row and the header share `GAP` and the
+  column widths, and a fixed width goes on a `ui.row` around the label
+  (`cell()`): a label's own `width` is ignored and it shrinks to its text. The
+  header is the scroll's first row, because the scrollbar takes a gutter only
+  when the list overflows, so a header outside the scroll lined up on short
+  lists and not on long ones.
+- **A row's key carries its icon state.** Swapping the placeholder glyph for
+  the `ui.image` inside a kept row left the row at its old content-sized width,
+  and every name truncated to three letters. Any child that changes type later
+  needs the same treatment.
+- **Checkboxes, not toggles** (`shared.checkbox()`, a glyph): a toggle says
+  "this takes effect now", and nothing here does until the button at the
+  bottom. The whole row is the click target. `ui.row` takes no `tooltip` on
+  this host (it logs a warning per row), so anything the user must know is
+  visible text.
