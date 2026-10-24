@@ -9,6 +9,7 @@ Nothing is compiled and there is no package manager, linter or CI here.
 ```sh
 python3 cursor/test_curmgr.py    # whole self-check
 cd cursor && python3 -c 'import test_curmgr as t; t.test_import_windows_inf_pack()'   # one test
+python3 icons/tests/test_iconmgr.py   # the icons plugin, same style
 ```
 
 Installing is `noctalia msg plugins source add <name> git <url>` then
@@ -30,11 +31,16 @@ pointing at this checkout; a git source serves the last pushed commit.
 Two halves, split on purpose: **Luau cannot decode PNGs or parse cursor
 binaries**, and the tool must still work from a keybind with the shell stopped.
 
-The repo is a plugin **source**: `catalog.toml` at the root indexes it, and the
-plugin itself lives in `cursor/`. Noctalia reads the catalog with
-`git show HEAD:catalog.toml`, so a bump only lands once pushed — and `version`
-therefore lives in two files, `catalog.toml` and `cursor/plugin.toml`. Keep them
-in step.
+The repo is a plugin **source**: `catalog.toml` at the root indexes it, and it
+ships two plugins, `cursor/` (`vn1k/cursor`) and `icons/` (`vn1k/icons`, see the
+end of this file). Noctalia reads the catalog with `git show HEAD:catalog.toml`,
+so a bump only lands once pushed — and `version` and `plugin_api` therefore live
+in two files, `catalog.toml` and `<plugin>/plugin.toml`. Keep them in step.
+
+This repo is where both are developed. The community-plugins fork
+(`~/Github/community-plugins`) only ever receives the final copy of a plugin
+directory at release time, without its tests (`cursor/test_curmgr.py`,
+`icons/tests/`); the fork's own `README.md` is maintained there.
 
 - `cursor/bin/curmgr.py` — the engine. All filesystem and config writes live here.
 - `cursor/panel.luau` / `cursor/shortcut.luau` — UI only. Shells out to curmgr, renders JSON.
@@ -272,3 +278,36 @@ Note that `noctalia msg config-reload` reloads the Luau script but **not**
 - `remove` and cleanup only ever touch the install folder (`USER_ICONS`, default
   `~/.local/share/icons`, `_is_under` guard). `main()` refuses a `CURMGR_INSTALL_DIR`
   outside `$HOME`, or one equal to it.
+
+## The icons plugin (`icons/`)
+
+Same split and the same contract as cursor: `bin/iconmgr.py` (standard library
+only) prints one JSON object per subcommand, and the Luau side only renders it.
+The host renders SVG in `ui.image`, so the panel shows the theme's own icon
+files and nothing is rasterised.
+
+- **Where Noctalia reads the theme** (`src/system/icon_resolver.cpp`):
+  gsettings `icon-theme` first, then `gtk-3.0`/`gtk-4.0` `settings.ini`. It
+  re-checks gsettings once a minute, so its launcher can lag a minute behind Use.
+- **Flatpak needs no layer**: the sandbox's `XDG_DATA_DIRS` already includes
+  `/run/host/user-share`, and the theme name comes through the portal.
+- **Papirus folder colours are symlinks** (`places/folder.svg → folder-<c>.svg`
+  and friends, per size dir). `folders` re-points them atomically; `specimen
+  --folder-color` previews another colour without touching disk. The panel
+  treats a picked colour like a picked theme: nothing is written until Use.
+  After a recolour, `_nudge_icon_theme` steps the gsettings value aside and
+  back, because GTK only notices a changed theme dir on its next lookup.
+- **Archives are only unpacked for Get more** (`fetch`). `install` from disk
+  takes folders only; the user extracts. Extraction uses tarfile's data filter
+  with one change: a link out of the archive is dropped, not fatal.
+- **pling's first request to a freshly signed download link hangs** every time;
+  a retry answers at once. `_download` gives the first attempt 4 s.
+- **Panel ticks**: a panel's `update()` runs only on `panel.setWantsSecondTicks`;
+  `noctalia.setUpdateInterval` is for bar widgets. The detached `fetch` is polled
+  that way through its state file.
+- **The host keeps a prop a later render merely leaves out.** A conditional
+  `fill`/`border` set to `nil` leaves the old value standing, and swapping a
+  row for a column at the same position reuses the node and its old size. Put
+  the state in the `key` (theme rows, swatches, result rows) and give every
+  view and action bar its own key.
+

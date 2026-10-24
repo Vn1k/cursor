@@ -1,7 +1,7 @@
 # Index of every plugin this source ships. The host reads it with
 # `git show HEAD:catalog.toml`, so a change only takes effect once committed and
-# pushed. cursor/plugin.toml stays authoritative and is re-read on enable; keep
-# `version` here in step with it.
+# pushed. Each <plugin>/plugin.toml stays authoritative and is re-read on enable;
+# keep `version` and `plugin_api` here in step with it.
 
 [[plugin]]
 id = "vn1k/cursor"
@@ -16,3 +16,17 @@ description = "Pick, import and build cursor themes, then apply them everywhere 
 deprecated = false
 plugin_api = 22
 tags = ["panel", "shortcut", "theming", "utility", "niri", "hyprland", "sway", "mangowc", "umbriel"]
+
+[[plugin]]
+id = "vn1k/icons"
+name = "Icons"
+version = "1.0.0"
+updated_at = 1792823214
+added_at = 1792823214
+author = "Vn1k"
+license = "MIT"
+icon = "icons"
+description = "Pick, preview and install icon themes, browse gnome-look.org, and recolor Papirus folders."
+deprecated = false
+plugin_api = 22
+tags = ["panel", "shortcut", "theming", "utility"]
