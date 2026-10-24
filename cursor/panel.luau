@@ -42,6 +42,14 @@ local installPath = ""
 -- Deleting a theme is destructive and a dialog would dismiss the panel, so the
 -- confirmation is the button itself: first click arms, second click removes.
 local pendingRemove = ""
+-- Undo resets every layer the plugin wrote; armed the same way as Remove.
+local pendingUninstall = false
+-- After an undo every layer reads "not set" or the system default, which is
+-- the point - so the drift warning stays quiet until the next apply.
+local undone = false
+-- Layers the last apply could not write (name -> reason). "Applied" alone hid
+-- a read-only settings.ini until the drift warning turned up later.
+local failedLayers = {}
 -- Import and Build each get their own report: they used to share one global,
 -- which is how a Windows import's mapping grid ended up rendering under Build
 -- too - both tabs called the same reportView() off the same variable.
@@ -466,7 +474,7 @@ end
 -- layer drifted, name it - the engine already sends the per-layer values, and
 -- "something disagrees" sends the user to the terminal to find out which.
 local function driftWarning()
-  if current == nil or current.consistent or busy or current.layers == nil then
+  if current == nil or current.consistent or busy or current.layers == nil or undone then
     return ui.box({ height = 0 })
   end
   local expected = majorityTheme(current.layers)
@@ -490,8 +498,29 @@ local function driftWarning()
   return ui.column({ gap = 2, align = "stretch" }, rows)
 end
 
+-- What the last apply could not write, and why. A layer this box simply does
+-- not have (no flatpak, no gsettings) is never in here: the engine skips it.
+local function failedWarning()
+  local names = sortedKeys(failedLayers)
+  if #names == 0 or busy then
+    return ui.box({ height = 0 })
+  end
+  local rows = {
+    ui.row({ gap = 8, align = "center" }, {
+      ui.glyph({ name = "alert-triangle", color = "tertiary", size = 16 }),
+      ui.label({ text = tr("applied_partly"), fontSize = 12, color = "tertiary", flexGrow = 1 }),
+    }),
+  }
+  for _, name in ipairs(names) do
+    table.insert(rows, ui.label({ text = `{name}: {failedLayers[name]}`, fontSize = 11,
+                                  color = "tertiary", maxLines = 1 }))
+  end
+  return ui.column({ gap = 2, align = "stretch" }, rows)
+end
+
 local function themesTab()
   return ui.column({ flexGrow = 1, gap = 12, align = "stretch" }, {
+    failedWarning(),
     driftWarning(),
     -- ui.scroll centres content shorter than its viewport, so a one-theme list
     -- sits mid-panel. It fills from the top as soon as the grid is taller.
@@ -810,6 +839,25 @@ local function installTab()
     ui.separator({}),
     ui.label({ text = tr("installed_themes"), fontSize = 12, fontWeight = "bold" }),
     ui.scroll({ flexGrow = 1, gap = 6 }, removableRows()),
+    ui.separator({}),
+    ui.row({ gap = 8, align = "center" }, {
+      ui.label({ text = tr("uninstall_hint"), fontSize = 12, color = "on_surface_variant",
+                 flexGrow = 1 }),
+      ui.button({
+        key = "uninstall",
+        text = pendingUninstall and tr("confirm_uninstall") or tr("uninstall"),
+        variant = pendingUninstall and "destructive" or "outline",
+        controlSize = "sm", enabled = not busy,
+        onClick = function()
+          if pendingUninstall then
+            onUninstall()
+          else
+            pendingUninstall = true
+            render()
+          end
+        end,
+      }),
+    }),
   })
 end
 
@@ -954,6 +1002,34 @@ function onRemoveTheme(name)
   end)
 end
 
+function onUninstall()
+  if busy then
+    return
+  end
+  busy = true
+  pendingUninstall = false
+  setStatus(tr("uninstalling"))
+  render()
+
+  call("uninstall", function(result, err)
+    if result == nil then
+      fail(err)
+      return
+    end
+    busy = false
+    undone = true
+    failedLayers = {}
+    local failed = sortedKeys(type(result.failed) == "table" and result.failed or {})
+    if #failed > 0 then
+      setStatus(`{tr("uninstalled_partly")} {table.concat(failed, ", ")}`, "tertiary")
+    else
+      setStatus(tr("uninstalled"), "primary")
+    end
+    noctalia.notify(tr("title"), tr("uninstalled"))
+    loadThemes()
+  end)
+end
+
 function onReload()
   previews = {}
   loadThemes()
@@ -982,6 +1058,7 @@ function onApply()
     return
   end
   busy = true
+  failedLayers = {}
   setStatus(tr("applying"))
   render()
 
@@ -1000,8 +1077,20 @@ function onApply()
       return
     end
     busy = false
-    setStatus(tr("applied"), "primary")
-    noctalia.notify(tr("title"), `{tr("applied")}: {selected}`)
+    undone = false
+    failedLayers = type(result.failed) == "table" and result.failed or {}
+    local failed = sortedKeys(failedLayers)
+    if #failed > 0 then
+      setStatus(`{tr("applied_partly")} {table.concat(failed, ", ")}`, "tertiary")
+      local lines = {}
+      for _, name in ipairs(failed) do
+        table.insert(lines, `{name}: {failedLayers[name]}`)
+      end
+      noctalia.notify(tr("title"), `{selected}. {tr("applied_partly")}\n{table.concat(lines, "\n")}`)
+    else
+      setStatus(tr("applied"), "primary")
+      noctalia.notify(tr("title"), `{tr("applied")}: {selected}`)
+    end
     loadCurrent(render)
   end)
 end

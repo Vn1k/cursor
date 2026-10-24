@@ -105,7 +105,7 @@
     },
     "install_dir": {
       "label": "Install folder",
-      "description": "Where imported, built and installed themes go, and the only folder Remove deletes from. Must be inside your home folder, and somewhere your apps look for cursors. Leave empty for ~/.local/share/icons."
+      "description": "Where imported, built and installed themes go, and the only folder Remove deletes from. Must be inside your home folder. Anywhere but the default, apps find it through XCURSOR_PATH after the next login. Leave empty for ~/.local/share/icons."
     },
     "niri_config": {
       "label": "niri config",
@@ -127,5 +127,12 @@
       "label": "Umbriel config",
       "description": "Leave empty for ~/.config/umbriel/config.toml. cursor.toml is written beside it."
     }
-  }
+  },
+  "applied_partly": "Applied, except:",
+  "uninstall": "Undo",
+  "confirm_uninstall": "Click again to undo everything",
+  "uninstall_hint": "Undo everything this plugin changed: compositor configs back as they were, the cursor back to the system default. Your themes stay.",
+  "uninstalling": "Undoing…",
+  "uninstalled": "Undone — the cursor is back to the system default",
+  "uninstalled_partly": "Undone, except:"
 }

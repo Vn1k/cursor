@@ -76,7 +76,11 @@ decide instead. The rest are best-effort and report their own reason. Every
 layer runs through `_layer()`, which turns an `OSError` into that layer's
 `{"ok": false, "reason"}`: a read-only file (Home Manager's `settings.ini`)
 fails one layer, never the whole apply after the compositor has already been
-written.
+written. A layer this box simply lacks (no `flatpak`, no `gsettings` or its
+schema) is `_skipped()`: `{"ok": false, "skipped": true}`. `_outcome()` lists
+every other non-ok layer under `failed`, which the panel shows instead of a bare
+"Applied", and when the whole run is not ok it joins them into `error`. Without
+that, a rolled-back compositor showed up as the generic "Error".
 `ensure_sizes()` runs before the layers and is the only slow part of an apply.
 It skips system themes outright, and once a user theme carries every size the
 compositors may ask for it says so in `<theme>/.curmgr-sizes`. A switch back to
@@ -100,7 +104,8 @@ so the ones that are not running do nothing.
 `COMPOSITORS` is the whole of it — adding a compositor is adding a row, never a
 new write path. Each row names its config, the managed include file it owns, a
 template for the line appended to the config (`{file}` is that include file, so
-the path is never spelled twice) or an `add_include` that places it, a
+the path is never spelled twice) or an `add_include` that places it plus the
+`remove_include` that takes it out again, a
 `render` function, the regexes
 `read_current()` reads back with, an optional validator and the reload argv.
 The renderers write only the body: `_apply_compositor` prepends the managed-by
@@ -240,6 +245,16 @@ Note that `noctalia msg config-reload` reloads the Luau script but **not**
   accepting a limit.
 - Binary format work is delegated entirely to `win2xcur`. Nothing here parses
   `.cur`, `.ani` or Xcursor by hand — keep it that way.
+- `uninstall` is the inverse of apply, and it only undoes what carries our mark.
+  That means the include (`remove_include`), lines prefixed `{comment}
+  {DISABLED_TAG}` (so `comment_block` and `comment_keys` must keep writing that
+  tag), and files holding `MANAGED_TEXT`. GTK loses just its two cursor keys.
+  Flatpak is the one place the engine edits the keyfile itself, because
+  `--unset-env` adds an "unset" entry rather than deleting ours. Apply followed by
+  uninstall must give each config back byte for byte; the tests check it.
+- An install folder other than `~/.local/share/icons` or `~/.icons` goes on
+  `XCURSOR_PATH`, written as the whole of `ICON_DIRS` because the variable
+  replaces Xcursor's default path, and Flatpak mounts it read-only.
 - `remove` and cleanup only ever touch the install folder (`USER_ICONS`, default
   `~/.local/share/icons`, `_is_under` guard). `main()` refuses a `CURMGR_INSTALL_DIR`
   outside `$HOME`, or one equal to it.

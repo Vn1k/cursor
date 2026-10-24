@@ -40,10 +40,9 @@ def _env_dirs(var: str, suffix: str = "") -> list[Path]:
 
 
 # Where themes are installed, and the only place `remove` may delete from;
-# main() refuses one that is not inside $HOME.
-# ponytail: an install dir outside Xcursor's search path (and outside ~/.icons,
-# which is all the Flatpak layer mounts) is listed here but unseen by apps.
-# Writing it into XCURSOR_PATH via environment.d would close that if it bites.
+# main() refuses one that is not inside $HOME. Anywhere but the two standard
+# places, apply puts it on XCURSOR_PATH and mounts it for Flatpak, or apps
+# would never see the themes listed here.
 USER_ICONS = _env_path("CURMGR_INSTALL_DIR", DATA / "icons")
 # Xcursor's own lookup order, so the first theme of a name here is the one apps
 # load. XDG_DATA_DIRS and XCURSOR_PATH are how NixOS and Guix expose their
@@ -72,6 +71,9 @@ BUILD_ROLE_DIR = CACHE / "curmgr" / "build-roles"
 
 NOMINAL_SIZES = (24, 32, 48, 64, 96)
 MANAGED_TEXT = "Managed by the Noctalia cursor plugin - edits here are overwritten."
+# Prefix on every config line the plugin comments out, so `uninstall` restores
+# exactly those and never a comment of the user's own.
+DISABLED_TAG = "cursor plugin:"
 
 # Slots shown in the preview strip, each with fallbacks across naming eras.
 PREVIEW_SLOTS = [
@@ -385,6 +387,30 @@ def _toml_add_include(text: str, entry: str, comment: str) -> str | None:
     return text[:files.start(2)] + body + text[files.end(2):]
 
 
+def _remove_appended_include(text: str, line: str, comment: str) -> str | None:
+    """Undo _append_include() exactly, or None if it was never applied."""
+    block = f"\n\n{comment} {MANAGED_TEXT}\n{line}\n"
+    return text.replace(block, "\n", 1) if block in text else None
+
+
+def _toml_remove_include(text: str, entry: str, comment: str) -> str | None:
+    """Undo _toml_add_include(), whichever of its three shapes it took."""
+    created = f"\n\n{comment} {MANAGED_TEXT}\n[include.optional]\nfiles = [{entry}]\n"
+    if created in text:
+        out = text.replace(created, "\n", 1)
+        return out if out.strip() else ""
+    e = re.escape(entry)
+    for pattern in (rf"\n[ \t]*{e},", rf",[ \t]*{e}", rf"\nfiles = \[{e}\]", e):
+        out, n = re.subn(pattern, "", text, count=1)
+        if n:
+            return out
+    return None
+
+
+def _restore_commented(text: str, comment: str) -> str:
+    return re.sub(rf"^{re.escape(comment)} {re.escape(DISABLED_TAG)} ", "", text, flags=re.M)
+
+
 # ponytail: line-level, so dotted keys (`cursor.theme =` under [input]) and
 # inline tables are not seen, and a user who writes the cursor that way keeps
 # winning over the include. Reading the merged config with tomllib would catch it.
@@ -398,7 +424,7 @@ def _comment_toml_keys(text: str, sections: dict[str, list[str]], comment: str) 
         else:
             key = re.match(r"^\s*([A-Za-z0-9_-]+)\s*=", line)
             if key and key.group(1) in sections.get(section, ()):
-                line, changed = f"{comment} {line}", True
+                line, changed = f"{comment} {DISABLED_TAG} {line}", True
         out.append(line)
     return "\n".join(out) + "\n" if changed else text
 
@@ -514,6 +540,7 @@ COMPOSITORS = {
         # noctalia.toml usually already uses - a second table is a TOML error)
         # and the user's own cursor keys are commented out, as niri's block is.
         "add_include": _toml_add_include,
+        "remove_include": _toml_remove_include,
         "comment_keys": {
             "input.cursor": ["theme", "size", "hide_when_typing", "hide_timeout_ms"],
             "environment": ["XCURSOR_THEME", "XCURSOR_SIZE"],
@@ -541,7 +568,12 @@ def detected_compositors() -> dict:
 
 
 def _backup(path: Path) -> Path:
-    dest = path.with_name(f"{path.name}.bak-cursor-{time.strftime('%Y%m%d-%H%M%S')}")
+    # Two edits in one second (apply then Undo) must not share a name, or the
+    # second backup overwrites the first - the one holding the original.
+    stamp = f"{path.name}.bak-cursor-{time.strftime('%Y%m%d-%H%M%S')}"
+    dest, n = path.with_name(stamp), 1
+    while dest.exists():
+        dest, n = path.with_name(f"{stamp}-{n}"), n + 1
     shutil.copy2(path, dest)
     return dest
 
@@ -643,7 +675,7 @@ def _comment_out_block(text: str, node: str, comment: str = "//") -> str:
             active = True
         if active:
             depth += line.count("{") - line.count("}")
-            out.append(f"{comment} " + line)
+            out.append(f"{comment} {DISABLED_TAG} " + line)
             if depth <= 0:
                 active = False
                 depth = 0
@@ -662,15 +694,27 @@ def _validate(argv: list[str] | None, path: Path) -> tuple[bool, str]:
     return proc.returncode == 0, (proc.stderr or proc.stdout).strip()[-400:]
 
 
-def _apply_gsettings(theme: str, size: int) -> dict:
+def _skipped(reason: str) -> dict:
+    """A layer this box simply does not have - never reported as a failure."""
+    return {"ok": False, "skipped": True, "reason": reason}
+
+
+def _gsettings_run(commands: list[list[str]]) -> dict:
+    """Each `gsettings` argv in turn; the first failure is the layer's result."""
     if not shutil.which("gsettings"):
-        return {"ok": False, "reason": "gsettings not installed"}
-    for key, value in (("cursor-theme", theme), ("cursor-size", str(size))):
-        proc = subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", key, value],
-                              capture_output=True, text=True, timeout=10)
+        return _skipped("gsettings not installed")
+    for args in commands:
+        proc = subprocess.run(["gsettings", *args], capture_output=True, text=True, timeout=10)
         if proc.returncode != 0:
-            return {"ok": False, "reason": proc.stderr.strip()}
+            reason = proc.stderr.strip()
+            # glib without gsettings-desktop-schemas, as _gsettings() reads it.
+            return _skipped(reason) if "No such schema" in reason else {"ok": False, "reason": reason}
     return {"ok": True}
+
+
+def _apply_gsettings(theme: str, size: int) -> dict:
+    return _gsettings_run([["set", "org.gnome.desktop.interface", key, value]
+                           for key, value in (("cursor-theme", theme), ("cursor-size", str(size)))])
 
 
 def _apply_flatpak(theme: str, size: int) -> dict:
@@ -678,9 +722,14 @@ def _apply_flatpak(theme: str, size: int) -> dict:
     # XCURSOR_PATH empty, so without this every Flatpak app falls back to the
     # runtime's Adwaita. One global user override; the CLI merges its keyfile.
     if not shutil.which("flatpak"):
-        return {"ok": False, "reason": "flatpak not installed"}
+        return _skipped("flatpak not installed")
     xcursor_path = f"/run/host/user-share/icons:{HOME / '.icons'}:/run/host/share/icons"
-    proc = subprocess.run(["flatpak", "override", "--user", "--filesystem=~/.icons:ro",
+    mounts = ["--filesystem=~/.icons:ro"]
+    if _custom_install_dir():
+        # Under $HOME (main() insists), so the sandbox sees it at the same path.
+        xcursor_path = f"{USER_ICONS}:{xcursor_path}"
+        mounts.append(f"--filesystem={USER_ICONS}:ro")
+    proc = subprocess.run(["flatpak", "override", "--user", *mounts,
                            f"--env=XCURSOR_PATH={xcursor_path}",
                            f"--env=XCURSOR_THEME={theme}", f"--env=XCURSOR_SIZE={size}"],
                           capture_output=True, text=True, timeout=10)
@@ -720,9 +769,18 @@ def _apply_xdg_default(theme: str) -> dict:
     return {"ok": True, "file": str(path)}
 
 
+def _custom_install_dir() -> bool:
+    """An install dir Xcursor does not search by default."""
+    return USER_ICONS not in (DATA / "icons", HOME / ".icons")
+
+
 def _apply_environment(theme: str, size: int) -> dict:
     ENV_CONF.parent.mkdir(parents=True, exist_ok=True)
-    ENV_CONF.write_text(f"# {MANAGED_TEXT}\nXCURSOR_THEME={theme}\nXCURSOR_SIZE={size}\n")
+    # XCURSOR_PATH replaces Xcursor's default path rather than adding to it, so
+    # it is written only when needed, and then as the whole of ICON_DIRS.
+    path = (f"XCURSOR_PATH={':'.join(map(str, ICON_DIRS))}\n"
+            if _custom_install_dir() else "")
+    ENV_CONF.write_text(f"# {MANAGED_TEXT}\nXCURSOR_THEME={theme}\nXCURSOR_SIZE={size}\n{path}")
     return {"ok": True, "file": str(ENV_CONF), "note": "applies to processes started after next login"}
 
 
@@ -852,7 +910,111 @@ def apply_theme(theme: str, size: int, hide_typing: bool, hide_ms: int) -> dict:
     # five portable layers still change the cursor and decide on their own.
     ok = (all(layers[name]["ok"] for name in detected) if detected
           else any(layer["ok"] for layer in layers.values()))
-    return {"ok": ok, "theme": theme, "size": size, "layers": layers, "sizes": sizes}
+    return _outcome(ok, layers, theme=theme, size=size, sizes=sizes)
+
+
+def _outcome(ok: bool, layers: dict, **extra) -> dict:
+    """Name the layers that failed (a skipped one did not), and say why in
+    `error` when the whole run counts as failed - the panel shows that text."""
+    failed = {name: layer.get("reason", "") for name, layer in layers.items()
+              if not layer["ok"] and not layer.get("skipped")}
+    result = {"ok": ok, **extra, "layers": layers, "failed": failed}
+    if not ok:
+        result["error"] = "; ".join(f"{n}: {r}" for n, r in failed.items()) or "no layer could be written"
+    return result
+
+
+# --------------------------------------------------------------------------
+# undoing everything (uninstall)
+# --------------------------------------------------------------------------
+
+def _uninstall_compositor(name: str, spec: dict) -> dict:
+    config, include_file, comment = spec["config"], spec["include_file"], spec["comment"]
+    include_line = spec["include_line"].format(file=include_file)
+    text = config.read_text()
+    removed = spec.get("remove_include", _remove_appended_include)(text, include_line, comment)
+    restored = _restore_commented(text if removed is None else removed, comment)
+    backup, notes = None, []
+    if restored != text:
+        backup = _backup(config)
+        config.write_text(restored)
+        ok, err = _validate(spec["validate"], config)
+        if not ok:
+            shutil.copy2(backup, config)
+            return {"ok": False, "reason": f"{name} rejected the restored config, rolled back: {err}"}
+        notes.append("removed the include and restored the lines it had commented out")
+    # Before 1.0.5 a commented-out block carried no tag, so it is not ours to guess at.
+    block = spec.get("comment_block")
+    if block and re.search(rf"^{re.escape(comment)} {block}\s*\{{", restored, re.M):
+        notes.append(f"a {block} block commented out by an older version is left as it is")
+    include_file.unlink(missing_ok=True)
+    os.utime(config, None)
+    # Only the plain reloads: `hyprctl setcursor` needs a theme to set.
+    notes += _reload({"reload": [a for a in spec["reload"] if "{" not in "".join(a)]}, "", 0)
+    return {"ok": True, "backup": str(backup) if backup else None, "notes": notes}
+
+
+def _undo_gtk() -> dict:
+    changed = []
+    for version in ("3.0", "4.0"):
+        path = CONFIG / f"gtk-{version}" / "settings.ini"
+        if not path.is_file():
+            continue
+        text = path.read_text(errors="replace")
+        kept = re.sub(r"^\s*gtk-cursor-theme-(?:name|size)\s*=.*\n?", "", text, flags=re.M)
+        if kept != text:
+            path.write_text(kept)
+            changed.append(str(path))
+    return {"ok": True, "files": changed}
+
+
+def _undo_managed_file(path: Path, marker: str) -> dict:
+    """Delete a file this plugin wrote whole - never one it did not."""
+    if path.is_file() and marker in path.read_text(errors="replace"):
+        path.unlink()
+        return {"ok": True, "removed": str(path)}
+    return {"ok": True}
+
+
+def _undo_flatpak() -> dict:
+    # `flatpak override --unset-env` does not delete a key: it adds an "unset"
+    # entry, which would also hide an XCURSOR_THEME the user exports some other
+    # way. So, unlike apply, this edits the keyfile - only our three keys.
+    import configparser
+    path = DATA / "flatpak" / "overrides" / "global"
+    if not path.is_file():
+        return {"ok": True}
+    keyfile = configparser.ConfigParser(interpolation=None, strict=False)
+    keyfile.optionxform = str  # keys are case-sensitive
+    keyfile.read_string(path.read_text())
+    if not keyfile.has_section("Environment"):
+        return {"ok": True}
+    removed = [k for k in ("XCURSOR_PATH", "XCURSOR_THEME", "XCURSOR_SIZE")
+               if keyfile.remove_option("Environment", k)]
+    if not removed:
+        return {"ok": True}
+    if not keyfile.items("Environment"):
+        keyfile.remove_section("Environment")
+    with path.open("w") as out:
+        keyfile.write(out, space_around_delimiters=False)
+    return {"ok": True, "note": "the read-only icon folder mounts are left in place"}
+
+
+def uninstall() -> dict:
+    """Undo every layer: configs back as they were, our files gone, and the
+    cursor settings back to the system default. Themes and backups stay."""
+    layers = {name: _layer(_uninstall_compositor, name, spec)
+              for name, spec in detected_compositors().items()}
+    layers |= {
+        "gsettings": _layer(_gsettings_run, [["reset", "org.gnome.desktop.interface", key]
+                                              for key in ("cursor-theme", "cursor-size")]),
+        "gtk": _layer(_undo_gtk),
+        "xdg_default": _layer(_undo_managed_file, HOME / ".icons" / "default" / "index.theme",
+                              "Managed by the Noctalia cursor plugin"),
+        "environment": _layer(_undo_managed_file, ENV_CONF, MANAGED_TEXT),
+        "flatpak": _layer(_undo_flatpak),
+    }
+    return _outcome(all(l["ok"] or l.get("skipped") for l in layers.values()), layers)
 
 
 # --------------------------------------------------------------------------
@@ -1567,6 +1729,8 @@ def main(argv=None) -> int:
     p.add_argument("source", type=Path, help="folder holding a cursors/ directory")
     p.add_argument("--name", default="", help="install under this name instead of the theme's own")
 
+    sub.add_parser("uninstall", help="undo every change the plugin made, back to the default cursor")
+
     p = sub.add_parser("remove", help="delete a theme you built (never a system one)")
     p.add_argument("theme")
 
@@ -1599,6 +1763,8 @@ def main(argv=None) -> int:
                 _overrides(args), args.dry_run)
         elif args.cmd == "install":
             result = install_theme(args.source, args.name)
+        elif args.cmd == "uninstall":
+            result = uninstall()
         elif args.cmd == "remove":
             root = find_theme(args.theme)
             if not _is_under(root, USER_ICONS):

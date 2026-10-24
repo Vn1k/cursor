@@ -511,6 +511,8 @@ def test_rejected_apply_restores_the_working_include():
                      path=f"{fake}{os.pathsep}{os.environ['PATH']}")
         assert result["layers"]["sway"]["ok"] is False, result["layers"]["sway"]
         assert include.read_text() == working, "the working include was not restored"
+        # The panel shows `error`; without it a rejection read as a bare "Error".
+        assert result["error"].startswith("sway: sway rejected"), result["error"]
 
 
 def test_theme_names_with_spaces_and_quotes_survive_every_compositor():
@@ -892,6 +894,52 @@ def test_apply_survives_readonly_gtk():
         assert not layers["gtk"]["ok"] and "ermission" in layers["gtk"]["reason"], layers["gtk"]
         assert layers["niri"]["ok"] and layers["environment"]["ok"], layers
         assert store.read_text() == "[Settings]\n"
+        # Named for the panel, which used to say "Applied" and nothing else.
+        assert list(result["failed"]) == ["gtk"], result["failed"]
+
+
+def test_missing_tools_are_skipped_not_failed():
+    """No gsettings or flatpak binary is a layer this box does not have; the
+    panel must not list it under failed layers after every apply."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        bare = home / "bin"
+        bare.mkdir()
+        for cmd in ("apply", "uninstall"):
+            result = run([cmd] + (["Adwaita"] if cmd == "apply" else []), home=home,
+                         path=str(bare))
+            # Undo edits the flatpak keyfile itself, so only apply needs the binary.
+            for layer in ("gsettings", "flatpak") if cmd == "apply" else ("gsettings",):
+                assert result["layers"][layer].get("skipped"), (cmd, result["layers"][layer])
+            assert result["failed"] == {}, (cmd, result["failed"])
+
+
+def test_custom_install_dir_reaches_apps():
+    """Themes in a custom install folder were listed but no app searched there."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        fake = home / "fakebin"
+        fake.mkdir()
+        argv = home / "flatpak-argv"
+        (fake / "flatpak").write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{argv}"\n')
+        (fake / "flatpak").chmod(0o755)
+        path = f"{fake}{os.pathsep}{os.environ['PATH']}"
+        env_conf = home / ".config/environment.d/90-xcursor.conf"
+
+        run(["apply", "Adwaita"], home=home, path=path)
+        assert "XCURSOR_PATH" not in env_conf.read_text(), "default dir must not pin the path"
+
+        mine = home / "my-icons"
+        env = {"CURMGR_INSTALL_DIR": str(mine)}
+        make_theme(home / "src" / "Mine", name="Mine")
+        run(["install", str(home / "src" / "Mine")], home=home, extra_env=env)
+        run(["apply", "Mine"], home=home, path=path, extra_env=env)
+        line = next(l for l in env_conf.read_text().splitlines() if l.startswith("XCURSOR_PATH="))
+        dirs = line.split("=", 1)[1].split(":")
+        assert dirs[0] == str(mine) and str(home / ".icons") in dirs, dirs
+        args = argv.read_text().splitlines()
+        assert f"--filesystem={mine}:ro" in args, args
+        assert any(a.startswith(f"--env=XCURSOR_PATH={mine}:") for a in args), args
 
 
 def test_install_dir_setting():
@@ -929,21 +977,30 @@ def test_compositor_config_setting():
         state = run(["current"], home=home, extra_env=env)
         assert state["layers"]["niri"] == "Adwaita" and state["size"] == 32, state
 
+
 def test_apply_comments_out_a_conflicting_cursor_block():
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
         niri_dir = home / ".config/niri"
         niri_dir.mkdir(parents=True)
-        (niri_dir / "config.kdl").write_text(
-            MINIMAL_NIRI + 'cursor {\n    xcursor-theme "Old"\n    xcursor-size 16\n}\n')
+        original = MINIMAL_NIRI + '// my note\ncursor {\n    xcursor-theme "Old"\n    xcursor-size 16\n}\n'
+        (niri_dir / "config.kdl").write_text(original)
         result = run(["apply", "Adwaita", "--size", "28"], home=home)
         assert result["layers"]["niri"]["ok"], result["layers"]["niri"]
         config = (niri_dir / "config.kdl").read_text()
-        assert '// cursor {' in config and '// }' in config
-        assert 'xcursor-theme "Old"' not in config.replace("// ", "")[:0] or True
+        assert '// cursor plugin: cursor {' in config and '// cursor plugin: }' in config
         proc = subprocess.run(["niri", "validate", "-c", str(niri_dir / "config.kdl")],
                               capture_output=True, text=True)
         assert proc.returncode == 0, proc.stderr[-500:]
+
+        # Undo hands the config back byte for byte, the user's own comment included.
+        undo = run(["uninstall"], home=home)
+        assert undo["layers"]["niri"]["ok"], undo["layers"]["niri"]
+        # Apply and Undo in the same second: the first backup (the original) survives.
+        backups = sorted(niri_dir.glob("config.kdl.bak-cursor-*"))
+        assert len(backups) == 2 and backups[0].read_text() == original, backups
+        assert (niri_dir / "config.kdl").read_text() == original
+        assert not (niri_dir / "cursor.kdl").exists()
 
 
 def test_apply_without_a_compositor_still_ok():
@@ -1083,7 +1140,7 @@ def test_umbriel_joins_the_existing_include_and_wins():
         # Only our keys go: hardware_cursor is the user's flicker workaround.
         assert config["input"]["cursor"] == {"hardware_cursor": False}, config["input"]
         assert config["environment"] == {"EDITOR": "nvim"}, config["environment"]
-        assert '# theme = "Old"   # mine' in text, text
+        assert '# cursor plugin: theme = "Old"   # mine' in text, text
 
         ours = tomllib.loads((umbriel / "cursor.toml").read_text())
         assert ours["input"]["cursor"] == {"theme": "Adwaita", "size": 24,
@@ -1194,6 +1251,78 @@ def test_remembered_sizes_skip_the_check():
         assert left_ptr.stat().st_mtime_ns == mtime and _nominals(left_ptr) == {32}
         names = [t["name"] for t in run(["list"], home=home)["themes"]]
         assert names.count("Known") == 1, names
+
+
+def test_uninstall_hands_every_config_back():
+    """Undo must give each compositor config back byte for byte."""
+    import tomllib
+    cases = [(rel, body) for rel, body, *_ in COMPOSITOR_CASES.values()]
+    cases += [("umbriel/config.toml", UMBRIEL_CONFIG),
+              ("umbriel/config.toml", '[include.optional]\nfiles = ["a.toml"]\n'),
+              ("umbriel/config.toml", "[include.optional]\n"),
+              ("umbriel/config.toml", "[include]\nfiles = []\n"),
+              ("umbriel/config.toml", "")]
+    for rel, body in cases:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config = home / ".config" / rel
+            config.parent.mkdir(parents=True)
+            config.write_text(body)
+            run(["apply", "Adwaita", "--hide-when-typing"], home=home)
+            assert config.read_text() != body, rel
+            result = run(["uninstall"], home=home)
+            name = next(n for n in result["layers"] if n not in PORTABLE)
+            assert result["layers"][name]["ok"], (rel, result["layers"][name])
+            assert config.read_text() == body, (rel, body, config.read_text())
+            assert not any(config.parent.glob("cursor.*")), rel
+            if rel.endswith(".toml"):
+                tomllib.loads(config.read_text())
+
+
+PORTABLE = ("gsettings", "gtk", "xdg_default", "environment", "flatpak")
+
+
+def test_uninstall_reverts_the_portable_layers():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        gtk3 = home / ".config/gtk-3.0/settings.ini"
+        gtk3.parent.mkdir(parents=True)
+        gtk3.write_text("[Settings]\ngtk-theme-name=Foo\n")
+        overrides = home / ".local/share/flatpak/overrides/global"
+        overrides.parent.mkdir(parents=True)
+        overrides.write_text("[Context]\nfilesystems=~/.icons:ro;\n\n[Environment]\n"
+                             "XCURSOR_THEME=Adwaita\nXCURSOR_SIZE=24\nEDITOR=nvim\n")
+        run(["apply", "Adwaita"], home=home)
+        result = run(["uninstall"], home=home)
+        assert result["failed"] == {}, result["failed"]
+        assert not (home / ".config/environment.d/90-xcursor.conf").exists()
+        assert not (home / ".icons/default/index.theme").exists()
+        assert gtk3.read_text() == "[Settings]\ngtk-theme-name=Foo\n", gtk3.read_text()
+        assert "gtk-cursor" not in (home / ".config/gtk-4.0/settings.ini").read_text()
+        flatpak = overrides.read_text()
+        assert "XCURSOR" not in flatpak and "EDITOR=nvim" in flatpak, flatpak
+        assert "unset" not in flatpak, "an unset entry would hide the user's own XCURSOR_THEME"
+
+        # Nothing left to undo: a second run is ok and changes nothing.
+        before = {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+        again = run(["uninstall"], home=home)
+        assert again["ok"] and again["failed"] == {}, again
+        assert {p: p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
+
+
+def test_uninstall_leaves_files_it_did_not_write():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        env_conf = home / ".config/environment.d/90-xcursor.conf"
+        env_conf.parent.mkdir(parents=True)
+        env_conf.write_text("XCURSOR_THEME=Mine\n")
+        index = home / ".icons/default/index.theme"
+        index.parent.mkdir(parents=True)
+        index.write_text("[Icon Theme]\nInherits=Mine\n")
+        run(["uninstall"], home=home)
+        assert env_conf.read_text() == "XCURSOR_THEME=Mine\n"
+        assert index.read_text() == "[Icon Theme]\nInherits=Mine\n"
+
 
 def test_apply_leaves_system_themes_alone():
     with tempfile.TemporaryDirectory() as tmp:

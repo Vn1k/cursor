@@ -138,6 +138,11 @@ second one deletes. Only themes it put there can be deleted — anything from
 `/usr/share/icons` or `~/.icons` is left alone, so you cannot break what you
 installed another way.
 
+At the bottom, **Undo** takes back everything the plugin changed: the
+compositor configs return exactly as they were, its own files are deleted, and
+the cursor goes back to the system default. Your themes stay. Like delete, the
+first click arms it.
+
 **Import Windows** converts a Windows cursor pack. Nearly every pack includes an
 `Install.inf` file, and when it does everything is figured out for you, animated
 cursors included. If a download contains several variants in separate folders,
@@ -172,7 +177,7 @@ In Noctalia's settings, under Plugins › Cursor.
 | Resampling | `lanczos` | How artwork is scaled. `point` keeps pixel art sharp, which suits older Windows packs; `lanczos` suits smooth modern ones; `mitchell` is in between. |
 | Engine path | empty | Leave it empty. Only needed if you moved the engine somewhere unusual. |
 | Extra theme folders | empty | More folders to look for cursor themes in. `~/.local/share/icons`, `~/.icons`, `$XCURSOR_PATH` and `$XDG_DATA_DIRS/icons` are always searched. |
-| Install folder | `~/.local/share/icons` | Where imported, built and installed themes go, and the only place **Remove** deletes from. It must be inside your home folder, and somewhere your apps look for cursors. |
+| Install folder | `~/.local/share/icons` | Where imported, built and installed themes go, and the only place **Remove** deletes from. It must be inside your home folder. Anywhere else than the default, apps find it through `XCURSOR_PATH` after the next login. |
 | niri / Hyprland / Sway / MangoWC / Umbriel config | `~/.config/…` | The compositor's main config, if yours lives elsewhere. The managed `cursor.kdl` / `cursor.conf` / `cursor.toml` is written next to it. |
 
 From a keybind or script, the same paths are the env vars `CURMGR_ICON_DIRS`,
@@ -193,9 +198,10 @@ missing. Everything else keeps working.
 through `XDG_DATA_DIRS` and `XCURSOR_PATH`. If yours are somewhere neither
 lists, add the folder under **Extra theme folders**.
 
-**One layer says permission denied.** That file is read-only — on NixOS, Home
-Manager owns `gtk-3.0/settings.ini`. The other layers are still applied; set
-the cursor for that one in your Home Manager config.
+**"Applied, except: gtk".** That file is read-only — on NixOS, Home Manager
+owns `gtk-3.0/settings.ini`. The panel lists each layer it could not write and
+why; the others are still applied. Set the cursor for that one in your Home
+Manager config.
 
 **The cursor did not change in an app.** If it was already open, it keeps the
 cursor it started with. Restart it.
