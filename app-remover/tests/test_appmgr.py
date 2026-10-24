@@ -126,6 +126,15 @@ class World:
         # An edited user copy shadows codium; rpm owns only the system file.
         desktop(self.home / ".local/share/applications/codium.desktop", "VSCodium (mine)")
         desktop(self.home / ".local/share/applications/script.desktop", "My Script")
+        # An app extracted to ~/Software, with its own launcher, and a launcher
+        # no package owns that sits outside your home folder.
+        self.foo_dir = self.home / "Software/foo-1.2"
+        (self.foo_dir / "lib").mkdir(parents=True)
+        (self.foo_dir / "foo").write_text("#!/bin/sh\n")
+        (self.foo_dir / "lib/data").write_text("x" * 100)
+        desktop(self.home / ".local/share/applications/foo.desktop", "Foo Studio",
+                Exec=f'"{self.foo_dir}/foo" %U', StartupWMClass="FooStudio")
+        desktop(apps / "sysapp.desktop", "System App", Exec="/usr/local/bin/sysapp")
         desktop(self.flatpak_exports / "applications/org.example.Notes.desktop", "Notes",
                 **{"X-Flatpak": "org.example.Notes"})
         # dnf5's records: `bash` is core, `tree` came with a group, `sudo` is on
@@ -262,8 +271,11 @@ def test_list_apps():
     w = world()
     out = w.run("list")
     keys = {i["key"]: i for i in out["items"]}
-    assert set(keys) == {"rpm:gimp", "rpm:codium", "local:script", "flatpak:org.example.Notes@user",
-                         "flatpak:org.example.Runtime@system"}, sorted(keys)
+    assert set(keys) == {"rpm:gimp", "rpm:codium", "local:script", "local:foo", "local:sysapp",
+                         "flatpak:org.example.Notes@user", "flatpak:org.example.Runtime@system"}, sorted(keys)
+    assert keys["local:foo"]["removable"] is True and keys["local:sysapp"]["removable"] is False
+    # Exec=true is on PATH in real life, not on the fakes' PATH: the script's app is gone.
+    assert keys["local:foo"]["gone"] is False and keys["local:script"]["gone"] is True
     # The user's edited copy is still known to be codium's.
     assert keys["rpm:codium"]["name"] == "VSCodium (mine)"
     assert keys["rpm:gimp"]["size"] == 115238502 and "gimp" in keys["rpm:gimp"]["names"]
@@ -376,11 +388,91 @@ def test_guard_without_dnf_records():
     assert items["rpm:fakewm"]["locked"] == "session"  # the session still counts
 
 
+def test_launcher_candidates():
+    """Which of an unpackaged app's files get offered, against a fake $HOME."""
+    home = Path(tempfile.mkdtemp(prefix="appmgr-home-"))
+    code = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+from remover import launchers
+home = os.environ["HOME"]
+def touch(rel):
+    path = os.path.join(home, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "w").close()
+    return path
+cases = {
+    "appimage": {"desktop": "copilot", "name": "Copilot",
+                 "exec": "env DESKTOPINTEGRATION=1 " + touch("AppImages/github_copilot.appimage") + " %u"},
+    "nested": {"desktop": "menulibre-foo", "name": "Foo", "exec": touch("Software/foo-1.2/bin/foo")},
+    "toolbox": {"desktop": "jetbrains-pycharm", "name": "PyCharm",
+                "exec": '"' + touch(".local/share/JetBrains/Toolbox/apps/pycharm/bin/pycharm.sh") + '" %f'},
+    "downloads": {"desktop": "bar", "name": "Bar", "exec": touch("Downloads/bar")},
+    "script": {"desktop": "tool", "name": "Tool", "exec": "python3 " + touch("Github/tool/tool.py")},
+    "system": {"desktop": "steamgame", "name": "Game", "exec": "/usr/bin/env A=1 /usr/bin/true"},
+    "nomatch": {"desktop": "qux", "name": "Qux", "exec": touch("Stuff/things/run")},
+}
+out = {k: (str(p.relative_to(home)) if (p := launchers.candidate(v)) else None) for k, v in cases.items()}
+print(json.dumps(out))
+"""
+    env = {**os.environ, "HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"),
+           "XDG_DATA_HOME": str(home / ".local/share"), "PATH": os.environ.get("PATH", "")}
+    proc = subprocess.run([sys.executable, "-B", "-c", code, str(BIN)], capture_output=True, text=True, env=env)
+    got = json.loads(proc.stdout or "{}") or proc.stderr
+    assert got == {
+        "appimage": "AppImages/github_copilot.appimage",   # the file itself
+        "nested": "Software/foo-1.2",                      # nearest folder with the app's name
+        "toolbox": ".local/share/JetBrains/Toolbox/apps/pycharm",  # never JetBrains itself
+        "downloads": "Downloads/bar",                      # the file, never ~/Downloads
+        "script": None,                                    # python3 is not the app's
+        "system": None,                                    # outside $HOME
+        "nomatch": None,                                   # no folder says whose it is
+    }, got
+
+
+def test_launcher_in_a_subfolder():
+    w = world()
+    # wine files its launchers under applications/wine/Programs/...
+    desktop(w.home / ".local/share/applications/wine/Programs/Tool.desktop", "Wine Tool",
+            Exec='env WINEPREFIX="/x" wine C:\\\\tool.exe')
+    items = {i["key"]: i for i in w.run("list")["items"]}
+    assert items["local:wine-Programs-Tool"]["removable"] is True
+    w.run("remove", "local:wine-Programs-Tool")
+    assert (w.home / "Trash/Tool.desktop").is_file()
+
+
+def test_remove_launcher():
+    w = world()
+    out = w.run("preview", "local:foo")
+    row = out["rows"][0]
+    assert row["kind"] == "launcher" and row["backend"] == "local" and row["gone"] is False
+    assert row["files"] == [{"path": str(w.foo_dir), "size": len("#!/bin/sh\n") + 100}]
+    assert out["freed"] == 0 and out["risky"] is False
+
+    (w.home / ".config/FooStudio").mkdir(parents=True)
+    removed = w.run("remove", "local:foo", "--with-files", "local:foo")
+    assert [r["key"] for r in removed["removed"]] == ["local:foo"]
+    assert (w.home / "Trash/foo.desktop").is_file() and (w.home / "Trash/foo-1.2").is_dir()
+    assert not w.foo_dir.exists()
+    assert [d["path"] for d in removed["leftovers"]] == [str(w.home / ".config/FooStudio")]
+    assert w.calls("pkexec") == [] and w.calls("dnf") == []
+
+
+def test_remove_launcher_keeps_files_unless_asked():
+    w = world()
+    w.run("remove", "local:foo")
+    assert (w.home / "Trash/foo.desktop").is_file() and w.foo_dir.is_dir()
+    # --with-files only ever means the files the engine works out itself.
+    w = world()
+    w.run("remove", "local:script", "--with-files", "local:script")
+    assert w.foo_dir.is_dir()
+
+
 def test_refusals():
     w = world()
     assert "not installed" in w.run("preview", "--", "-rf", expect_ok=False)["error"]
     assert "not installed" in w.run("preview", "rpm:nosuch", expect_ok=False)["error"]
-    assert "not installed" in w.run("preview", "local:script", expect_ok=False)["error"]
+    assert "outside your home folder" in w.run("preview", "local:sysapp", expect_ok=False)["error"]
     assert "bad arguments" in w.run("bogus", expect_ok=False)["error"]
     assert "not a leftover" in w.run("trash", "/etc", expect_ok=False)["error"]
     # A folder outside $HOME never becomes a leftover root.

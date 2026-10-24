@@ -106,6 +106,76 @@ local function warning(P)
   })
 end
 
+-- Launchers no package owns: nothing is uninstalled, the launcher goes to
+-- the Trash, and under each one the app files the engine found, off until
+-- selected. "Not found" is said too, so an empty row is never a mystery.
+local function launcherGroup(S, A, P)
+  local members = {}
+  for _, row in ipairs(P.rows) do
+    if row.kind == "launcher" then
+      local entry = { ui.label({ text = row.label, fontSize = 12, maxLines = 1 }) }
+      local f = (row.files or {})[1]
+      if f ~= nil then
+        local on = S.withFiles[row.key] == true
+        table.insert(entry, ui.row({ key = `files_{row.key}_{on and "on" or "off"}`, gap = 8, align = "center",
+                                     paddingH = 6, paddingV = 4, radius = 6,
+                                     onClick = function() A.toggleFiles(row.key) end }, {
+          shared.checkbox(on),
+          ui.label({ text = fmt("also_files", { path = shared.home(f.path) }), fontSize = 11, maxLines = 1,
+                     flexGrow = 1, color = on and "on_surface" or "on_surface_variant" }),
+          ui.label({ text = size(f.size), fontSize = 11, color = "on_surface_variant" }),
+        }))
+      else
+        table.insert(entry, ui.label({ text = tr(row.gone and "app_gone" or "no_files"), fontSize = 11,
+                                       color = "on_surface_variant" }))
+      end
+      table.insert(members, ui.column({ key = `launcher_{row.key}`, gap = 2, paddingH = 22, align = "stretch" }, entry))
+    end
+  end
+  if #members == 0 then
+    return ui.box({ height = 0 })
+  end
+  return ui.column({ key = "group_launcher", gap = 6, align = "stretch" }, {
+    ui.column({ gap = 1 }, {
+      ui.label({ text = fmt("launchers_heading", { n = #members }), fontSize = 13, fontWeight = "semibold" }),
+      ui.label({ text = tr("launchers_hint"), fontSize = 11, color = "on_surface_variant" }),
+    }),
+    ui.column({ gap = 6, align = "stretch" }, members),
+  })
+end
+
+-- What goes back to you: the packages, plus the app files selected so far.
+local function freed(S, P)
+  local bytes = P.freed or 0
+  for _, row in ipairs(P.rows) do
+    local f = (row.files or {})[1]
+    if row.kind == "launcher" and f ~= nil and S.withFiles[row.key] then
+      bytes += f.size or 0
+    end
+  end
+  return bytes
+end
+
+-- "12 packages and 2 launchers": the button says exactly what goes.
+local function what(P)
+  local packages, launchers = 0, 0
+  for _, row in ipairs(P.rows) do
+    if row.kind == "launcher" then
+      launchers += 1
+    else
+      packages += 1
+    end
+  end
+  local parts = {}
+  if packages > 0 then
+    table.insert(parts, fmt(packages == 1 and "n_packages_one" or "n_packages_many", { n = packages }))
+  end
+  if launchers > 0 then
+    table.insert(parts, fmt(launchers == 1 and "n_launchers_one" or "n_launchers_many", { n = launchers }))
+  end
+  return table.concat(parts, tr("and"))
+end
+
 local function hasFlatpak(P)
   for _, row in ipairs(P.rows) do
     if row.backend == "flatpak" then
@@ -125,6 +195,7 @@ function M.render(S, A)
       group(P.rows, "picked", "picked_heading", nil),
       group(P.rows, "dependent", "dependent_heading", "dependent_hint"),
       group(P.rows, "unused", "unused_heading", "unused_hint"),
+      launcherGroup(S, A, P),
     }
   end
 
@@ -142,18 +213,17 @@ function M.render(S, A)
   end
   -- A risky removal takes a second, explicit click that says it again. A
   -- blocked one has no Remove at all, only the way back.
-  local count = P ~= nil and P.count or 0
   local isBlocked = P ~= nil and #(P.blocked or {}) > 0
   local armed = S.armed and P ~= nil and P.risky and not isBlocked
   table.insert(footer, ui.row({ key = `actions_{armed and "armed" or "idle"}`, gap = 8, align = "center" }, {
-    ui.label({ text = P ~= nil and fmt("frees", { size = size(P.freed) ~= "" and size(P.freed) or "0 B" }) or "",
+    ui.label({ text = P ~= nil and fmt("frees", { size = size(freed(S, P)) ~= "" and size(freed(S, P)) or "0 B" }) or "",
                fontSize = 12, color = "on_surface_variant", flexGrow = 1 }),
     ui.button({ key = "back", text = tr("back"), variant = "ghost", controlSize = "sm",
                 onClick = function() A.back() end }),
     ui.button({ key = `remove_{isBlocked and "blocked" or "open"}`, variant = "destructive",
                 enabled = P ~= nil and not S.busy and not isBlocked,
                 text = isBlocked and tr("cant_remove")
-                  or fmt(armed and "remove_confirm" or (count == 1 and "remove_one" or "remove_many"), { n = count }),
+                  or fmt(armed and "remove_confirm_what" or "remove_what", { what = P ~= nil and what(P) or "" }),
                 onClick = function()
                   if isBlocked then
                     return

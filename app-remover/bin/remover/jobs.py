@@ -13,7 +13,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import config, flatpak, guard, inventory, leftovers, rpm
+from . import config, flatpak, guard, inventory, launchers, leftovers, rpm
 from .util import Fail, run
 
 LOG_LINES = 200
@@ -21,16 +21,18 @@ LOG_LINES = 200
 CANCELLED = (126, 127)
 
 
-def _split(items: list[dict]) -> tuple[list[dict], list[dict]]:
+def _split(items: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
     rpms = [i for i in items if i["backend"] == "rpm"]
     fpks = [i for i in items if i["backend"] == "flatpak"]
+    # lookup() already let through only launchers in your applications folder.
+    locs = [i for i in items if i["backend"] == "unpackaged" and launchers.removable(i)]
     for item in rpms:
         if not config.RPM_NAME.fullmatch(item["pkg"]):
             raise Fail(f"refusing an odd package name: {item['pkg']}")
     for item in fpks:
         if not (config.FLATPAK_ID.fullmatch(item["pkg"]) and config.INSTALLATION.fullmatch(item["installation"])):
             raise Fail(f"refusing an odd flatpak id: {item['pkg']}")
-    return rpms, fpks
+    return rpms, fpks, locs
 
 
 def blocked(rows: list[dict], locks: dict[str, str]) -> list[dict]:
@@ -54,7 +56,7 @@ def risk(names: list[str], count: int) -> dict:
 
 
 def preview(keys: list[str]) -> dict:
-    rpms, fpks = _split(inventory.lookup(keys))
+    rpms, fpks, locs = _split(inventory.lookup(keys))
     rows, missing, freed = [], [], 0
     if rpms:
         labels = {i["pkg"]: i["name"] for i in rpms}
@@ -72,9 +74,17 @@ def preview(keys: list[str]) -> dict:
     for row in rows:
         row["locked"] = locks.get(row["name"].lower(), "")
         row["protected"] = row["name"].lower() in warned
+    packages = list(rows)
+    # A launcher uninstalls nothing: it is listed, with the app files it could
+    # take, but stays out of the guard, the warning and what is freed.
+    for item in locs:
+        rows.append({"name": item["desktop"], "label": item["name"], "size": 0, "kind": "launcher",
+                     "backend": "local", "key": item["key"], "path": item["path"],
+                     "files": launchers.files(item), "gone": item.get("gone", False),
+                     "locked": "", "protected": False})
     return {"ok": True, "rows": rows, "count": len(rows), "freed": freed, "missing": missing,
-            "blocked": blocked(rows, locks),
-            **risk([r["name"] for r in rows], sum(1 for r in rows if r["kind"] != "unused"))}
+            "blocked": blocked(packages, locks),
+            **risk([r["name"] for r in packages], sum(1 for r in packages if r["kind"] != "unused"))}
 
 
 def write_state(path: Path | None, **state) -> None:
@@ -146,11 +156,30 @@ def _reopener(panel: str | None):
     return reopen
 
 
-def remove(keys: list[str], state: Path | None, delete_data: bool, panel: str | None = None) -> dict:
+def _trash_launcher(item: dict, with_files: bool, log: list[str]) -> bool:
+    """The launcher to the Trash, then, if asked, the app files worked out from
+    it here and now. A file that will not move is logged, not fatal: the
+    launcher is what was asked for."""
+    extra = launchers.files(item) if with_files else []
+    log.append(f"$ gio trash {item['path']}")
+    if not leftovers.gio_trash(item["path"]):
+        log.append(f"could not move {item['path']} to the Trash")
+        return False
+    log.append(f"Moved {item['path']} to the Trash")
+    for f in extra:
+        moved = leftovers.gio_trash(f["path"])
+        log.append(f"{'Moved' if moved else 'Could not move'} {f['path']} to the Trash")
+    return True
+
+
+def remove(keys: list[str], state: Path | None, delete_data: bool, panel: str | None = None,
+           with_files: set[str] | None = None) -> dict:
     log: list[str] = []
     reopen = _reopener(panel)
     try:
-        rpms, fpks = _split(inventory.lookup(keys))
+        rpms, fpks, locs = _split(inventory.lookup(keys))
+        if locs:
+            leftovers.require_gio()
         # The panel's review is not the guard; this is. dnf is asked again what
         # the removal takes, so nothing protected goes as a mere dependency,
         # whoever calls the engine.
@@ -177,6 +206,13 @@ def remove(keys: list[str], state: Path | None, delete_data: bool, panel: str | 
             else:
                 cancelled = cancelled or (code in CANCELLED and group is rpms)
                 failed += group
+        # Launchers last: a dismissed password prompt stops everything.
+        for item in locs:
+            if not cancelled and _trash_launcher(item, item["key"] in (with_files or set()), log):
+                removed.append(item)
+            else:
+                failed.append(item)
+            write_state(state, state="running", log=log[-LOG_LINES:])
         names = {n for i in removed if not (delete_data and i["backend"] == "flatpak") for n in i["names"]}
         result = {"ok": not failed, "cancelled": cancelled,
                   "removed": [{"key": i["key"], "name": i["name"]} for i in removed],

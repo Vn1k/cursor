@@ -33,8 +33,19 @@ noctalia msg panel-toggle vn1k/app-remover:manager
 1. **Pick.** **Apps** lists what has a launcher, each resolved to the package
    that owns it; **All packages** adds every package you installed yourself,
    command-line tools and fonts included. Turn on what you want gone; the bar
-   at the bottom keeps the count and the space it frees. Launchers no package
-   owns (scripts, hand-made `.desktop` files) are listed but cannot be picked.
+   at the bottom keeps the count and the space it frees.
+
+   Launchers no package owns (an app extracted to `~/Software`, an AppImage, a
+   hand-made `.desktop` file) say **No package** under Type, and what removing
+   them means: *Launcher in your home folder*, *Its app is gone, only the
+   launcher is left*, or *Launcher outside your home folder* (those need root
+   and cannot be picked). Nothing is uninstalled for these: the launcher goes
+   to the Trash, and the review offers the app's own folder or AppImage as
+   well, off until you select it. It is the folder nearest the program whose
+   name carries the app's name (`~/Software/apidog-2.7.54`, `~/.local/zed.app`),
+   never `~`, `~/Downloads` or another folder of yours, and none at all for a
+   launcher that runs something outside your home folder (Steam, Flatpak,
+   distrobox, a script through `python3`).
 2. **Review.** dnf resolves the whole removal as you, with no password, and the
    panel splits its answer into what you picked, what needs it and has to go
    too, and what was only there for it. A removal that touches a protected

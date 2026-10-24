@@ -377,6 +377,17 @@ which only read `S` and call `A`. Ported from the GTK app in
   - The tests point `APPMGR_DNF_STATE`/`APPMGR_DNF_PROTECTED_DIR` at fixtures, and
     the module header sets them before importing `remover`, since `config` reads
     the environment once at import.
+- **Launchers no package owns** (`launchers.py`) are removable when the winning
+  `.desktop` file sits anywhere under `~/.local/share/applications` (wine files
+  its own in subfolders): it goes to the Trash, no password. The app's files
+  are offered off by default: an AppImage or a program straight in `~` or
+  `~/.local/bin` is the file itself, otherwise the *nearest* ancestor of the
+  program whose name carries one of the app's words (nearest, so a Toolbox
+  IDE never offers the whole `JetBrains` folder). `$HOME`, the XDG roots and
+  the xdg-user-dirs are never offered, nor anything holding them. The panel
+  only sends `--with-files KEY`; `jobs.remove()` works the paths out again
+  itself. `gone` marks a launcher whose program no longer exists: on this
+  machine five of eighteen were, apps deleted by hand.
 - **dnf's output is a terminal progress bar** (`100% | 250.0 B/s | ...`), so
   the panel never shows it as the main view. `jobs.progress()` reads the
   `[n/N]` counter and the package into the state file, the panel draws a

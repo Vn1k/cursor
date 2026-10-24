@@ -37,6 +37,7 @@ local S = {
   preview = nil,        -- the engine's preview answer
   armed = false,        -- a risky removal's first click
   deleteData = false,
+  withFiles = {},       -- launcher key -> also trash its app files
   job = nil,            -- { info = state file contents } while a removal runs
   result = nil,         -- the removal's answer, until Done
   log = {},             -- dnf's output from the last removal
@@ -276,7 +277,7 @@ function A.review()
   if #keys == 0 or S.busy then
     return
   end
-  S.view, S.preview, S.armed = "review", nil, false
+  S.view, S.preview, S.armed, S.withFiles = "review", nil, false, {}
   S.deleteData = shared.setting("flatpak_delete_data", false) == true
   S.busy = true
   setStatus("")
@@ -306,6 +307,11 @@ function A.setDeleteData(value)
   render()
 end
 
+function A.toggleFiles(key)
+  S.withFiles[key] = not S.withFiles[key] or nil
+  render()
+end
+
 function A.arm()
   S.armed = true
   render()
@@ -330,8 +336,13 @@ function A.remove()
   -- --reopen: the engine brings the panel back as soon as the password is
   -- in, so the progress shows while dnf runs. The panel-open after the `;`
   -- covers a cancelled prompt, where dnf never starts.
+  -- Only keys go across: the engine works the app files out again itself.
+  local withFiles = ""
+  for key in pairs(S.withFiles) do
+    withFiles ..= ` --with-files {shellQuote(key)}`
+  end
   noctalia.runAsync(`{shared.engine()} remove {quoted(keys)} --state {shellQuote(state)}`
-    .. ` --reopen {shellQuote(PANEL_ID)}`
+    .. ` --reopen {shellQuote(PANEL_ID)}{withFiles}`
     .. (S.deleteData and " --delete-data" or "")
     .. ` > /dev/null 2>&1; noctalia msg panel-open {shellQuote(PANEL_ID)}`)
   render()

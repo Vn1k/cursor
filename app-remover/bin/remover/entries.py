@@ -70,7 +70,7 @@ def parse(path: Path) -> dict | None:
     if not name:
         return None
     return {"name": name, "icon": group.get("Icon", ""), "wmclass": group.get("StartupWMClass", ""),
-            "flatpak": group.get("X-Flatpak", "")}
+            "flatpak": group.get("X-Flatpak", ""), "exec": group.get("Exec", "")}
 
 
 def classify(path: str) -> str:

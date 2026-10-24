@@ -9,10 +9,10 @@ import hashlib
 import json
 import os
 
-from . import config, entries, flatpak, guard, rpm
+from . import config, entries, flatpak, guard, launchers, rpm
 from .util import Fail
 
-CACHE_VERSION = 2
+CACHE_VERSION = 4
 
 
 def backends() -> dict:
@@ -56,9 +56,14 @@ def _apps(have: dict) -> list[dict]:
     for entry in system:
         owner = next((owners[p] for p in [entry["path"], *entry["shadowed"]] if owners.get(p)), None)
         if owner is None:
-            items.append({"key": f"local:{entry['id']}", "name": entry["name"], "backend": "unpackaged",
-                          "pkg": "", "size": 0, "installation": "", "desktop": entry["id"],
-                          "icon": entry["icon"], "names": [], "launchers": 1})
+            item = {"key": f"local:{entry['id']}", "name": entry["name"], "backend": "unpackaged",
+                    "pkg": "", "size": 0, "installation": "", "desktop": entry["id"],
+                    "icon": entry["icon"], "launchers": 1, "path": entry["path"], "exec": entry["exec"]}
+            prog = launchers.program(entry["exec"])
+            item["names"] = sorted({n for n in (*_entry_names(entry), prog.stem if prog else "") if n})
+            item["removable"] = launchers.removable(item)
+            item["gone"] = launchers.gone(entry["exec"])
+            items.append(item)
         else:
             by_pkg.setdefault(owner, []).append(entry)
     for (pkg, size), group in by_pkg.items():
@@ -147,11 +152,11 @@ def lookup(keys: list[str]) -> list[dict]:
         if all(k in found for k in wanted):
             break
         for item in load(mode)["items"]:
-            if item["key"] in wanted and item["backend"] != "unpackaged":
+            if item["key"] in wanted and (item["backend"] != "unpackaged" or item.get("removable")):
                 found.setdefault(item["key"], item)
     missing = [k for k in wanted if k not in found]
     if missing:
-        raise Fail(f"not installed, or not from a package: {', '.join(missing)}")
+        raise Fail(f"not installed, or a launcher outside your home folder: {', '.join(missing)}")
     locked = [f"{found[k]['pkg']} ({found[k]['locked']})" for k in wanted if found[k]["locked"]]
     if locked:
         raise Fail(f"refusing to remove a protected package: {', '.join(locked)}")

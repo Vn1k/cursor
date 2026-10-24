@@ -61,7 +61,8 @@ end
 -- the callback's CPU budget, and a page has forty rows.
 local function labels()
   return { unpackaged = tr("not_packaged"), flatpak = tr("source_flatpak"), rpm = tr("source_rpm"),
-           preinstalled = tr("preinstalled"),
+           preinstalled = tr("preinstalled"), launcherHome = tr("launcher_home"),
+           launcherOutside = tr("launcher_outside"), launcherGone = tr("launcher_gone"),
            lock = { dnf = tr("lock_dnf"), core = tr("lock_core"), session = tr("lock_session"),
                     never = tr("lock_never") } }
 end
@@ -75,6 +76,10 @@ local function detail(item, L)
     table.insert(bits, L.lock[item.locked] or item.locked)
   elseif item.preinstalled then
     table.insert(bits, L.preinstalled)
+  elseif item.backend == "unpackaged" then
+    -- What removing it means, since there is no package: a launcher that
+    -- starts nothing any more is the one worth saying first.
+    table.insert(bits, not item.removable and L.launcherOutside or (item.gone and L.launcherGone or L.launcherHome))
   end
   if (item.pkg or "") ~= "" and string.lower(item.pkg) ~= string.lower(item.name) then
     table.insert(bits, item.pkg)
@@ -106,7 +111,7 @@ end
 local function row(S, A, L, item)
   local picked = S.picked[item.key] ~= nil
   local locked = (item.locked or "") ~= ""
-  local removable = item.backend ~= "unpackaged" and not locked
+  local removable = (item.backend ~= "unpackaged" or item.removable == true) and not locked
   local sub = detail(item, L)
   -- The icon state is in the key too. Swapping the placeholder for the image
   -- inside a kept row left the row at its old, content-sized width, and every

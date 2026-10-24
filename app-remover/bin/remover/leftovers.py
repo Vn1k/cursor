@@ -57,14 +57,23 @@ def _allowed(path: str) -> bool:
     return any(p.parent == Path(root) for root in config.LEFTOVER_ROOTS)
 
 
-def trash(paths: list[str]) -> dict:
+def require_gio() -> None:
     if not shutil.which("gio"):
         raise Fail("gio is not installed, so nothing can go to the Trash")
+
+
+def gio_trash(path: str) -> bool:
+    """Move one path to the Trash. The only way anything here leaves the disk."""
+    return run(["gio", "trash", "--", path]).returncode == 0
+
+
+def trash(paths: list[str]) -> dict:
+    require_gio()
     refused = [p for p in paths if not _allowed(p)]
     if refused:
         raise Fail(f"not a leftover folder: {', '.join(refused)}")
     trashed, failed = [], []
     for path in paths:
-        (trashed if run(["gio", "trash", "--", path]).returncode == 0 else failed).append(path)
+        (trashed if gio_trash(path) else failed).append(path)
     return {"ok": not failed, "trashed": trashed, "failed": failed,
             **({"error": f"could not move to the Trash: {', '.join(failed)}"} if failed else {})}

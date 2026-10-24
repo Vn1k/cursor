@@ -7,11 +7,12 @@ what comes back. The work lives in remover/, one module per concern.
 
   list [--all]                         apps with a launcher, or every user-installed package
   preview KEY...                       what removing KEYs takes with it, no password asked
-  remove KEY... [--state F] [--delete-data] [--reopen PANEL]
+  remove KEY... [--state F] [--delete-data] [--reopen PANEL] [--with-files KEY]
                                        uninstall, progress to F; run it detached
   trash PATH...                        move leftover folders to the Trash
 
-A KEY is what `list` calls an item's key: rpm:<name> or flatpak:<id>@<installation>.
+A KEY is what `list` calls an item's key: rpm:<name>, flatpak:<id>@<installation>, or
+local:<desktop id> for a launcher in ~/.local/share/applications that no package owns.
 """
 import argparse
 import json
@@ -34,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--state", type=Path)
     p.add_argument("--delete-data", action="store_true")
     p.add_argument("--reopen", metavar="PANEL", help="noctalia panel to open once the password is in")
+    p.add_argument("--with-files", metavar="KEY", action="append", default=[],
+                   help="also move this launcher's app files to the Trash")
     p = sub.add_parser("trash")
     p.add_argument("paths", nargs="+")
 
@@ -44,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "preview":
             result = jobs.preview(args.keys)
         elif args.cmd == "remove":
-            result = jobs.remove(args.keys, args.state, args.delete_data, args.reopen)
+            result = jobs.remove(args.keys, args.state, args.delete_data, args.reopen, set(args.with_files))
         else:
             result = leftovers.trash(args.paths)
     except SystemExit as exc:  # argparse: usage errors still answer in JSON
