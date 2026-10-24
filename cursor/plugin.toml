@@ -1,12 +1,12 @@
 id = "vn1k/cursor"
 name = "Cursor"
-version = "1.0.3"
+version = "1.0.4"
 plugin_api = 8
 author = "Vn1k"
 license = "MIT"
 icon = "pointer"
 description = "Pick, import and build cursor themes, then apply them everywhere at once."
-tags = ["panel", "shortcut", "theming", "utility", "niri", "hyprland", "sway", "mangowc"]
+tags = ["panel", "shortcut", "theming", "utility", "niri", "hyprland", "sway", "mangowc", "umbriel"]
 
 # bin/curmgr.py owns every cursor file and every config write; this plugin runs
 # it and draws the JSON it prints, so nothing here needs to know a binary
@@ -99,6 +99,13 @@ key = "mango_config"
 type = "file"
 label_key = "settings.mango_config.label"
 description_key = "settings.mango_config.description"
+default = ""
+
+[[setting]]
+key = "umbriel_config"
+type = "file"
+label_key = "settings.umbriel_config.label"
+description_key = "settings.umbriel_config.description"
 default = ""
 
 [[panel]]

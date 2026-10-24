@@ -352,10 +352,78 @@ def _render_mango(theme: str, size: int, hide_typing: bool, hide_ms: int, config
     ]) + "\n"
 
 
+def _append_include(text: str, line: str, comment: str) -> str | None:
+    """The config with the include line appended, or None if it has it already."""
+    if re.search(rf"^\s*{re.escape(line)}\s*$", text, re.M):
+        return None
+    return text.rstrip("\n") + f"\n\n{comment} {MANAGED_TEXT}\n{line}\n"
+
+
+def _toml_add_include(text: str, entry: str, comment: str) -> str | None:
+    """Add `entry` last to [include.optional] files, creating what is missing.
+
+    Last, so it beats Noctalia's own include. Keeps the array's style: one
+    entry per line stays that way, an inline array stays inline.
+    """
+    if re.search(rf"^[^#\n]*{re.escape(entry)}", text, re.M):
+        return None
+    header = re.search(r"^\[include\.optional\][ \t]*$", text, re.M)
+    if not header:
+        return (text.rstrip("\n") + f"\n\n{comment} {MANAGED_TEXT}\n"
+                f"[include.optional]\nfiles = [{entry}]\n")
+    end = re.compile(r"^\s*\[", re.M).search(text, header.end())
+    section_end = end.start() if end else len(text)
+    files = re.compile(r"^(\s*files\s*=\s*\[)([^\]]*)\]", re.M).search(
+        text, header.end(), section_end)
+    if not files:
+        return text[:header.end()] + f"\nfiles = [{entry}]" + text[header.end():]
+    body = files.group(2).rstrip()
+    if "\n" in files.group(2):
+        body = f"{body}{'' if body.endswith(',') or not body.strip() else ','}\n  {entry},\n"
+    else:
+        body = f"{body}, {entry}" if body.strip() else entry
+    return text[:files.start(2)] + body + text[files.end(2):]
+
+
+# ponytail: line-level, so dotted keys (`cursor.theme =` under [input]) and
+# inline tables are not seen, and a user who writes the cursor that way keeps
+# winning over the include. Reading the merged config with tomllib would catch it.
+def _comment_toml_keys(text: str, sections: dict[str, list[str]], comment: str) -> str:
+    """Comment out the listed keys of the listed [section]s, nothing else."""
+    out, section, changed = [], "", False
+    for line in text.splitlines():
+        header = re.match(r"^\s*\[+\s*([^\]]+?)\s*\]+\s*(?:#.*)?$", line)
+        if header:
+            section = header.group(1)
+        else:
+            key = re.match(r"^\s*([A-Za-z0-9_-]+)\s*=", line)
+            if key and key.group(1) in sections.get(section, ()):
+                line, changed = f"{comment} {line}", True
+        out.append(line)
+    return "\n".join(out) + "\n" if changed else text
+
+
+def _render_umbriel(theme: str, size: int, hide_typing: bool, hide_ms: int, config_text: str) -> str:
+    # TOML basic strings take the same \\ and \" escapes as KDL. [environment]
+    # needs an Umbriel restart; [input.cursor] reloads on save.
+    return "\n".join([
+        "[input.cursor]",
+        f"theme = {_quoted(theme)}",
+        f"size = {size}",
+        f"hide_when_typing = {'true' if hide_typing else 'false'}",
+        f"hide_timeout_ms = {min(3600000, max(0, hide_ms))}",
+        "",
+        "[environment]",
+        f"XCURSOR_THEME = {_quoted(theme)}",
+        f'XCURSOR_SIZE = "{size}"',
+    ]) + "\n"
+
+
 NIRI_CONFIG = _env_path("CURMGR_NIRI_CONFIG", CONFIG / "niri" / "config.kdl")
 HYPRLAND_CONFIG = _env_path("CURMGR_HYPRLAND_CONFIG", CONFIG / "hypr" / "hyprland.conf")
 SWAY_CONFIG = _env_path("CURMGR_SWAY_CONFIG", CONFIG / "sway" / "config")
 MANGO_CONFIG = _env_path("CURMGR_MANGO_CONFIG", CONFIG / "mango" / "config.conf")
+UMBRIEL_CONFIG = _env_path("CURMGR_UMBRIEL_CONFIG", CONFIG / "umbriel" / "config.toml")
 
 # One entry per compositor whose own cursor has to be set separately from the
 # five portable layers. Adding a compositor is adding a row here, not a new
@@ -435,6 +503,30 @@ COMPOSITORS = {
         "ms_re": r"^cursor_hide_timeout=(\d+)$",
         "ms_scale": 1000,
     },
+    "umbriel": {
+        "config": UMBRIEL_CONFIG,
+        "include_file": UMBRIEL_CONFIG.parent / "cursor.toml",
+        "include_line": '"cursor.toml"',
+        "comment": "#",
+        "render": _render_umbriel,
+        # Umbriel applies its includes first and the including file last, so
+        # the include joins [include.optional] (which Noctalia's own
+        # noctalia.toml usually already uses - a second table is a TOML error)
+        # and the user's own cursor keys are commented out, as niri's block is.
+        "add_include": _toml_add_include,
+        "comment_keys": {
+            "input.cursor": ["theme", "size", "hide_when_typing", "hide_timeout_ms"],
+            "environment": ["XCURSOR_THEME", "XCURSOR_SIZE"],
+        },
+        "validate": ["umbriel", "config", "validate", "-c"],
+        "reload": [],  # Umbriel watches the config and its optional includes
+        "theme_re": r'^theme\s*=\s*("(?:[^"\\]|\\.)*")',
+        "decode": _unquote,
+        "size_re": r"^size\s*=\s*(\d+)",
+        "typing_re": r"^hide_when_typing\s*=\s*true",
+        "ms_re": r"^hide_timeout_ms\s*=\s*(\d+)",
+        "ms_scale": 1,
+    },
 }
 
 
@@ -484,16 +576,24 @@ def _apply_compositor(name: str, spec: dict, theme: str, size: int,
         text = _comment_out_block(text, block, comment)
         notes.append(f"commented out the pre-existing top-level {block} block")
 
+    keys = spec.get("comment_keys")
+    if keys:
+        commented = _comment_toml_keys(text, keys, comment)
+        if commented != text:
+            backup = backup or _backup(config)
+            text = commented
+            notes.append("commented out the config's own cursor keys")
+
     # Kept for the rollback: after the first apply the config already includes
     # this file, so deleting it on a rejection would leave a dangling include.
     previous = include_file.read_text() if include_file.is_file() else None
     include_file.write_text(f"{comment} {MANAGED_TEXT}\n"
                             + spec["render"](theme, size, hide_typing, hide_ms, text))
 
-    if not re.search(rf"^\s*{re.escape(include_line)}\s*$", text, re.M):
-        if backup is None:
-            backup = _backup(config)
-        text = text.rstrip("\n") + f"\n\n{comment} {MANAGED_TEXT}\n{include_line}\n"
+    included = spec.get("add_include", _append_include)(text, include_line, comment)
+    if included is not None:
+        backup = backup or _backup(config)
+        text = included
         notes.append(f"added {include_line}")
 
     if text != config.read_text():

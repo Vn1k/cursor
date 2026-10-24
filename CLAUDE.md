@@ -52,7 +52,7 @@ missing or broken", never as a bad request — so never print progress, warnings
 partial output to stdout from curmgr.
 
 Paths the user can move come in as **env vars**, never flags: `CURMGR_ICON_DIRS`
-(`:`-joined), `CURMGR_INSTALL_DIR` and `CURMGR_{NIRI,HYPRLAND,SWAY,MANGO}_CONFIG`.
+(`:`-joined), `CURMGR_INSTALL_DIR` and `CURMGR_{NIRI,HYPRLAND,SWAY,MANGO,UMBRIEL}_CONFIG`.
 The panel's `pathEnv()` exports only the settings that are set, so an unset one
 leaves the engine on its XDG default, and a keybind can export the same names.
 They are read once at import (`_env_path()`), so the module constants
@@ -100,7 +100,8 @@ so the ones that are not running do nothing.
 `COMPOSITORS` is the whole of it — adding a compositor is adding a row, never a
 new write path. Each row names its config, the managed include file it owns, a
 template for the line appended to the config (`{file}` is that include file, so
-the path is never spelled twice), a `render` function, the regexes
+the path is never spelled twice) or an `add_include` that places it, a
+`render` function, the regexes
 `read_current()` reads back with, an optional validator and the reload argv.
 The renderers write only the body: `_apply_compositor` prepends the managed-by
 header itself, using the row's `comment`.
@@ -114,6 +115,13 @@ mtime is bumped because niri watches it, not the included file.
 - `comment_block` is **niri-only**: a second top-level `cursor` node is a KDL
   collision, while Hyprland, Sway and Mango are last-wins parsers and the
   include goes on the end, so ours simply overrides theirs.
+- Umbriel is the odd one out: it applies includes **first** and `config.toml`
+  last, so the user's own `[input.cursor]` / `[environment]` keys would beat
+  ours. Its `comment_keys` comments out just those keys (never
+  `hardware_cursor` and the rest), and its `add_include` puts `cursor.toml` last
+  in `[include.optional] files`. That table usually exists already because
+  Noctalia's own `noctalia.toml` is included there, and declaring it twice is a
+  TOML error. Validated with `umbriel config validate -c`.
 - For the same last-wins reason the non-niri renderers always write *both* hide
   keys, including the off values. Omitting one would leave an earlier setting of
   the user's standing after the panel turns the toggle off.

@@ -528,10 +528,10 @@ def test_theme_names_with_spaces_and_quotes_survive_every_compositor():
             (home / ".config" / config_rel).write_text(body)
 
         result = run(["apply", name, "--size", "32"], home=home)
-        for comp in ("niri", "hyprland", "sway", "mango"):
+        for comp in ("niri", "hyprland", "sway", "mango", "umbriel"):
             assert result["layers"][comp]["ok"], (comp, result["layers"][comp])
         state = run(["current"], home=home)
-        for comp in ("niri", "hyprland", "sway", "mango"):
+        for comp in ("niri", "hyprland", "sway", "mango", "umbriel"):
             assert state["layers"][comp] == name, (comp, state["layers"][comp])
         # No `consistent` check: the memory gsettings backend forgets between
         # processes and reads back the default, so it only agrees for Adwaita.
@@ -984,6 +984,12 @@ COMPOSITOR_CASES = {
         ["cursor_theme=Adwaita", "cursor_size=32",
          "cursor_hide_on_keypress=1", "cursor_hide_timeout=3"],
     ),
+    "umbriel": (
+        "umbriel/config.toml", "[input.cursor]\nhardware_cursor = false\n", "umbriel/cursor.toml",
+        '"cursor.toml"',
+        ['theme = "Adwaita"', "size = 32", "hide_when_typing = true",
+         "hide_timeout_ms = 3000", 'XCURSOR_THEME = "Adwaita"', 'XCURSOR_SIZE = "32"'],
+    ),
 }
 
 
@@ -1033,6 +1039,79 @@ def test_apply_sway():
 
 def test_apply_mango():
     check_compositor("mango")
+
+
+def test_apply_umbriel():
+    check_compositor("umbriel")
+
+
+UMBRIEL_CONFIG = """\
+[include.optional]
+files = [
+  "~/.config/umbriel/noctalia.toml",
+]
+
+[input.cursor]
+theme = "Old"   # mine
+size = 32
+hardware_cursor = false
+
+[environment]
+XCURSOR_THEME = "Old"
+EDITOR = "nvim"
+"""
+
+
+def test_umbriel_joins_the_existing_include_and_wins():
+    """Umbriel applies its includes first and config.toml last, and Noctalia's own
+    noctalia.toml already holds [include.optional]: a second table is a TOML
+    error, and the user's own cursor keys would beat the include."""
+    import tomllib
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        umbriel = home / ".config/umbriel"
+        umbriel.mkdir(parents=True)
+        (umbriel / "config.toml").write_text(UMBRIEL_CONFIG)
+        result = run(["apply", "Adwaita", "--size", "24", "--hide-when-typing",
+                      "--hide-after-inactive-ms", "3000"], home=home)
+        assert result["layers"]["umbriel"]["ok"], result["layers"]["umbriel"]
+
+        text = (umbriel / "config.toml").read_text()
+        config = tomllib.loads(text)
+        assert config["include"]["optional"]["files"] == [
+            "~/.config/umbriel/noctalia.toml", "cursor.toml"], config["include"]
+        # Only our keys go: hardware_cursor is the user's flicker workaround.
+        assert config["input"]["cursor"] == {"hardware_cursor": False}, config["input"]
+        assert config["environment"] == {"EDITOR": "nvim"}, config["environment"]
+        assert '# theme = "Old"   # mine' in text, text
+
+        ours = tomllib.loads((umbriel / "cursor.toml").read_text())
+        assert ours["input"]["cursor"] == {"theme": "Adwaita", "size": 24,
+                                           "hide_when_typing": True,
+                                           "hide_timeout_ms": 3000}, ours
+        assert ours["environment"] == {"XCURSOR_THEME": "Adwaita", "XCURSOR_SIZE": "24"}, ours
+
+        backups = list(umbriel.glob("config.toml.bak-cursor-*"))
+        run(["apply", "Adwaita", "--size", "32"], home=home)
+        assert (umbriel / "config.toml").read_text() == text, "config edited twice"
+        assert list(umbriel.glob("config.toml.bak-cursor-*")) == backups
+        state = run(["current"], home=home)
+        assert state["layers"]["umbriel"] == "Adwaita" and state["size"] == 32, state
+
+
+def test_umbriel_include_on_one_line_or_absent():
+    import tomllib
+    for body, files in (('[include.optional]\nfiles = ["a.toml"]\n', ["a.toml", "cursor.toml"]),
+                        ("[include.optional]\n", ["cursor.toml"]),
+                        ("[include]\nfiles = []\n", ["cursor.toml"]),
+                        ("", ["cursor.toml"])):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".config/umbriel").mkdir(parents=True)
+            (home / ".config/umbriel/config.toml").write_text(body)
+            run(["apply", "Adwaita"], home=home)
+            config = tomllib.loads((home / ".config/umbriel/config.toml").read_text())
+            assert config["include"]["optional"]["files"] == files, (body, config)
 
 
 def test_a_positive_hide_timeout_never_reads_back_as_never():

@@ -122,6 +122,10 @@
     "mango_config": {
       "label": "MangoWC config",
       "description": "Leave empty for ~/.config/mango/config.conf. cursor.conf is written beside it."
+    },
+    "umbriel_config": {
+      "label": "Umbriel config",
+      "description": "Leave empty for ~/.config/umbriel/config.toml. cursor.toml is written beside it."
     }
   }
 }

@@ -121,6 +121,7 @@ local PATH_SETTINGS = {
   hyprland_config = "CURMGR_HYPRLAND_CONFIG",
   sway_config = "CURMGR_SWAY_CONFIG",
   mango_config = "CURMGR_MANGO_CONFIG",
+  umbriel_config = "CURMGR_UMBRIEL_CONFIG",
 }
 
 local function pathEnv()
