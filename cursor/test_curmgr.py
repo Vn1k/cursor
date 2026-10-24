@@ -1086,6 +1086,8 @@ def test_apply_adds_missing_sizes_for_every_compositor():
         result = run(["apply", "Few", "--size", "28"], home=home)
         assert {28, 35, 42, 49, 56, 84} <= set(result["sizes"]["added"]), result["sizes"]
         assert {28, 32, 35, 42, 49, 56, 84} <= _nominals(left_ptr)
+        marker = {int(n) for n in (theme / ".curmgr-sizes").read_text().split()}
+        assert {28, 35, 42, 49, 56, 84} <= marker, marker
         assert (theme / "cursors/default").is_symlink(), "aliases must stay symlinks"
         assert premultiplied(left_ptr)
         # re-encoding the untouched size must not premultiply it a second time
@@ -1097,6 +1099,22 @@ def test_apply_adds_missing_sizes_for_every_compositor():
         assert again["sizes"]["added"] == [], again["sizes"]
         assert left_ptr.stat().st_mtime_ns == mtime, "complete theme was rewritten"
 
+
+
+def test_remembered_sizes_skip_the_check():
+    """A theme switched back to must not be decoded again: that check alone took
+    up to 7s per apply. The note is trusted, so a 32-only theme stays as it is."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        theme = make_theme(home / ".local/share/icons/Known", name="Known")
+        (theme / ".curmgr-sizes").write_text("28 35 42 49 56 84\n")
+        left_ptr = theme / "cursors/left_ptr"
+        mtime = left_ptr.stat().st_mtime_ns
+        result = run(["apply", "Known", "--size", "28"], home=home)
+        assert result["sizes"] == {"added": []}, result["sizes"]
+        assert left_ptr.stat().st_mtime_ns == mtime and _nominals(left_ptr) == {32}
+        names = [t["name"] for t in run(["list"], home=home)["themes"]]
+        assert names.count("Known") == 1, names
 
 def test_apply_leaves_system_themes_alone():
     with tempfile.TemporaryDirectory() as tmp:

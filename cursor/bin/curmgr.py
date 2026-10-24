@@ -644,6 +644,30 @@ def _target_sizes(size: int) -> set[int]:
             | {size * math.ceil(s) for s in COMMON_SCALES})
 
 
+# Sizes every cursor file of a user theme is known to carry, so switching back
+# to a theme skips ensure_sizes()' full decode. write_theme() and
+# install_theme() build into a fresh staging dir, so a rebuilt theme starts
+# without one.
+# ponytail: trusts that nobody edits a theme's files by hand; a stale note only
+# costs exactness (the nearest size is used). Reinstalling the theme or deleting
+# the dotfile resets it.
+SIZES_MARKER = ".curmgr-sizes"
+
+
+def _read_sizes_marker(root: Path) -> set[int]:
+    try:
+        return {int(s) for s in (root / SIZES_MARKER).read_text().split()}
+    except (OSError, ValueError):
+        return set()
+
+
+def _write_sizes_marker(root: Path, sizes: set[int]) -> None:
+    try:
+        (root / SIZES_MARKER).write_text(" ".join(map(str, sorted(sizes))) + "\n")
+    except OSError:
+        pass  # only ever a shortcut
+
+
 def ensure_sizes(root: Path, size: int) -> dict:
     """Give every cursor in a user theme an image at each size a compositor may ask for.
 
@@ -651,6 +675,13 @@ def ensure_sizes(root: Path, size: int) -> dict:
     ImageMagick only costs the exact sizes, never the apply itself.
     """
     target = _target_sizes(size)
+    # Before any parsing: decoding a theme just to learn its sizes costs up to
+    # 7s, and a system theme is never rewritten whatever it lacks.
+    if not _is_under(root, USER_ICONS):
+        return {"added": [], "note": "system theme: the nearest available size is used"}
+    recorded = _read_sizes_marker(root)
+    if target <= recorded:
+        return {"added": []}
     try:
         from win2xcur.parser import open_blob
         from win2xcur.writer import to_x11
@@ -667,9 +698,8 @@ def ensure_sizes(root: Path, size: int) -> dict:
     files = [f for f in sorted((root / "cursors").iterdir()) if f.is_file() and not f.is_symlink()]
     missing = {f.name: m for f in files if (m := missing_in(f))}
     if not missing:
+        _write_sizes_marker(root, recorded | target)
         return {"added": []}
-    if not _is_under(root, USER_ICONS):
-        return {"added": [], "note": "system theme: the nearest available size is used"}
 
     dest, staging, retired = _stage(root.name)
     # symlinks=True keeps the alias symlinks, exactly as install_theme() does.
@@ -688,6 +718,8 @@ def ensure_sizes(root: Path, size: int) -> dict:
         frames = _expand_sizes(frames, sorted(existing | target))
         path.write_bytes(to_x11(frames))
         added |= lacking
+    # Into staging, so the note lands with the files it describes.
+    _write_sizes_marker(staging, recorded | target)
     _swap_in(dest, staging, retired)
     return {"added": sorted(added)}
 

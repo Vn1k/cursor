@@ -77,6 +77,11 @@ layer runs through `_layer()`, which turns an `OSError` into that layer's
 `{"ok": false, "reason"}`: a read-only file (Home Manager's `settings.ini`)
 fails one layer, never the whole apply after the compositor has already been
 written.
+`ensure_sizes()` runs before the layers and is the only slow part of an apply.
+It skips system themes outright, and once a user theme carries every size the
+compositors may ask for it says so in `<theme>/.curmgr-sizes`. A switch back to
+that theme therefore parses nothing. Without that note, decoding a theme just
+to read its sizes took up to 7s on every apply.
 `read_current()` reads the same set back and sets `consistent`, which is the
 drift warning the panel shows; that disagreement is the bug this plugin exists to
 fix. An **undetected compositor contributes no key at all** to `layers` — a key

@@ -2,7 +2,7 @@
   "active": "active",
   "applied": "Cursor applied",
   "apply": "Apply",
-  "applying": "Applying…",
+  "applying": "Applying… The first use of a theme at a new size takes longer.",
   "build": "Build",
   "build_again": "Build again",
   "build_hint": "A folder of PNGs. It is read and shown below before anything is written. Add spec.json to set hotspots, animation frames and delays.",
