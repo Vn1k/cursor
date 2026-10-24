@@ -32,14 +32,23 @@ label_key = "settings.show_unpackaged.label"
 description_key = "settings.show_unpackaged.description"
 default = true
 
-# Exported as APPMGR_PROTECTED. Warning only: dnf's protected_packages is the
-# hard floor under it.
+# Exported as APPMGR_PROTECTED. Warning only: guard.py locks the core system,
+# dnf's protected list and the running session outright.
 [[setting]]
 key = "protected_packages"
 type = "string_list"
 label_key = "settings.protected_packages.label"
 description_key = "settings.protected_packages.description"
 default = ["kernel", "kernel-core", "systemd", "glibc", "dnf5", "dnf", "rpm", "niri", "noctalia", "noctalia-shell", "bash", "coreutils", "polkit", "sudo"]
+
+# Exported as APPMGR_NEVER_REMOVE: locked like Fedora's core system, whole
+# transaction included.
+[[setting]]
+key = "never_remove"
+type = "string_list"
+label_key = "settings.never_remove.label"
+description_key = "settings.never_remove.description"
+default = []
 
 [[setting]]
 key = "big_transaction"

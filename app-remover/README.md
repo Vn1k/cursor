@@ -49,13 +49,29 @@ noctalia msg panel-toggle vn1k/app-remover:manager
    `~/.cache` whose name is exactly the package's, the launcher's or the
    window class's are offered, all off. The ones you turn on go to the Trash.
 
+## What it will not remove
+
+Three tiers, read from the files dnf5 keeps (`/etc/dnf/protected.d`,
+`/usr/lib/sysimage/libdnf5`), checked by the engine itself, so a script or
+keybind calling `bin/appmgr.py` cannot get around them either:
+
+| Tier | What | Effect |
+| --- | --- | --- |
+| Locked | dnf's protected packages, the mandatory packages of Fedora's `core` group, the packages running your desktop (the compositor and Noctalia), and your **Never remove** list | A lock instead of a checkbox. If a removal would take one along as a dependency, the review says which and why, and there is no Remove button |
+| Warned | the mandatory packages of Fedora's `standard` group, and **Packages that need a warning** | The review turns red and asks twice |
+| Came with Fedora | anything a Fedora group installed (Firefox, Nautilus, LibreOffice) | Only labelled: removing the apps a system came with is what this panel is for |
+
+On a distro without dnf5 only the running desktop and the Never remove list
+are locked.
+
 ## Settings
 
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
 | `default_view` | `select` | `apps` | What the panel lists when it opens: apps with a launcher, or all packages. |
 | `show_unpackaged` | `bool` | `true` | List launchers no package owns. |
-| `protected_packages` | `string_list` | kernel, systemd, glibc, dnf, rpm, niri, noctalia… | Removing any of these, even as a dependency, turns the review red. Cleared, the built-in list applies. |
+| `never_remove` | `string_list` | empty | Packages or Flatpak ids that are locked like the core system. |
+| `protected_packages` | `string_list` | kernel, systemd, glibc, dnf, rpm, niri, noctalia… | Removing any of these, even as a dependency, turns the review red. Only a warning; the locked tier is separate. Cleared, the built-in list applies. |
 | `big_transaction` | `int` | `10` | Warn when a removal takes more than this many packages you picked or that need them. Libraries nothing else uses are not counted. |
 | `leftover_dirs` | `string_list` | empty | Folders searched for leftovers instead of the four XDG ones. Only folders inside `$HOME` count. |
 | `elevate_command` | `string` | empty (`pkexec`) | What runs dnf as root, e.g. `run0`. |

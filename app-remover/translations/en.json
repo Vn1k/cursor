@@ -16,6 +16,11 @@
   "source_rpm": "rpm",
   "source_flatpak": "Flatpak",
   "not_packaged": "No package",
+  "preinstalled": "Came with Fedora",
+  "lock_dnf": "Fedora protects this package",
+  "lock_core": "Part of Fedora's core system",
+  "lock_session": "Runs your desktop session",
+  "lock_never": "On your Never remove list",
   "col_name": "Name",
   "col_type": "Type",
   "col_size": "Size",
@@ -42,6 +47,11 @@
   "dependent_hint": "These stop working without it, so dnf takes them too.",
   "unused_heading": "Also removed: {n} nothing else uses",
   "unused_hint": "Libraries and data that were only there for what you picked.",
+  "blocked_heading": "This removal can't go ahead",
+  "blocked_picked": "{name}: {reason}.",
+  "blocked_dependent": "{name} would go with it: {reason}.",
+  "blocked_hint": "Nothing was removed. Go back and pick something else.",
+  "cant_remove": "Can't remove",
   "risk_protected": "This removes {names}. Your system may not start or log in afterwards.",
   "risk_big": "This removes {n} packages you picked or that need them, more than {limit} (the Big removal setting). Check the second group: those are other apps that stop working.",
   "delete_data": "Also delete the Flatpak apps' own data",
@@ -89,7 +99,11 @@
     },
     "protected_packages": {
       "label": "Packages that need a warning",
-      "description": "Removing any of these, even as a dependency, turns the review red and asks twice. Clear the list to go back to the built-in one."
+      "description": "Removing any of these, even as a dependency, turns the review red and asks twice. Fedora's core system, dnf's protected packages and your running desktop are always blocked; this list only warns. Clear it to go back to the built-in one."
+    },
+    "never_remove": {
+      "label": "Never remove",
+      "description": "Packages or Flatpak app ids this panel will not remove, not even as a dependency of something else."
     },
     "big_transaction": {
       "label": "Big removal",

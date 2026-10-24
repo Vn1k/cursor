@@ -60,13 +60,22 @@ end
 -- Looked up once per render, not per row: every host call counts against
 -- the callback's CPU budget, and a page has forty rows.
 local function labels()
-  return { unpackaged = tr("not_packaged"), flatpak = tr("source_flatpak"), rpm = tr("source_rpm") }
+  return { unpackaged = tr("not_packaged"), flatpak = tr("source_flatpak"), rpm = tr("source_rpm"),
+           preinstalled = tr("preinstalled"),
+           lock = { dnf = tr("lock_dnf"), core = tr("lock_core"), session = tr("lock_session"),
+                    never = tr("lock_never") } }
 end
 
--- What the row is underneath its name: the package, when that is not obvious
--- from the name, and how many launchers go with it.
-local function detail(item)
+-- What the row is underneath its name: why it cannot go, or that it came with
+-- the system, then the package when the name does not give it away, and how
+-- many launchers go with it.
+local function detail(item, L)
   local bits = {}
+  if (item.locked or "") ~= "" then
+    table.insert(bits, L.lock[item.locked] or item.locked)
+  elseif item.preinstalled then
+    table.insert(bits, L.preinstalled)
+  end
   if (item.pkg or "") ~= "" and string.lower(item.pkg) ~= string.lower(item.name) then
     table.insert(bits, item.pkg)
   end
@@ -96,8 +105,9 @@ end
 
 local function row(S, A, L, item)
   local picked = S.picked[item.key] ~= nil
-  local removable = item.backend ~= "unpackaged"
-  local sub = detail(item)
+  local locked = (item.locked or "") ~= ""
+  local removable = item.backend ~= "unpackaged" and not locked
+  local sub = detail(item, L)
   -- The icon state is in the key too. Swapping the placeholder for the image
   -- inside a kept row left the row at its old, content-sized width, and every
   -- name truncated to three letters.
@@ -107,7 +117,9 @@ local function row(S, A, L, item)
     paddingH = 8, paddingV = 6, radius = 8, fill = picked and "surface_variant" or nil,
     onClick = (removable and not S.busy) and function() A.toggle(item) end or nil,
   }, {
-    shared.checkbox(picked, removable),
+    -- A lock, not a dimmed box: it says this one is held back on purpose,
+    -- not that something is broken.
+    locked and shared.lockbox() or shared.checkbox(picked, removable),
     lead(item, icon),
     ui.column({ flexGrow = 1, gap = 1, align = "stretch" }, {
       ui.label({ text = item.name, fontSize = 13, fontWeight = "medium", maxLines = 1,

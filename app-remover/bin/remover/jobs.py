@@ -13,7 +13,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import config, flatpak, inventory, leftovers, rpm
+from . import config, flatpak, guard, inventory, leftovers, rpm
 from .util import Fail, run
 
 LOG_LINES = 200
@@ -33,6 +33,12 @@ def _split(items: list[dict]) -> tuple[list[dict], list[dict]]:
     return rpms, fpks
 
 
+def blocked(rows: list[dict], locks: dict[str, str]) -> list[dict]:
+    """The rows the guardrail stops, picked or only taken along."""
+    return [{"name": r["name"], "label": r.get("label", r["name"]), "kind": r["kind"],
+             "reason": locks[r["name"].lower()]} for r in rows if r["name"].lower() in locks]
+
+
 def risk(names: list[str], count: int) -> dict:
     """What makes the review turn red: a protected name, or a big pull.
 
@@ -40,7 +46,8 @@ def risk(names: list[str], count: int) -> dict:
     are left out: removing Inkscape takes eleven of them, which is cleanup, and
     a warning on every ordinary removal teaches people to ignore the real one.
     A protected name counts wherever it sits, unused libraries included."""
-    hits = sorted({n for n in names if n.lower() in config.PROTECTED})
+    warned = guard.warns()
+    hits = sorted({n for n in names if n.lower() in warned})
     big = count > config.BIG_TRANSACTION
     return {"risky": bool(hits) or big, "protected": hits, "big": big, "weighty": count,
             "limit": config.BIG_TRANSACTION}
@@ -61,9 +68,12 @@ def preview(keys: list[str]) -> dict:
         rows.append({"name": item["pkg"], "label": item["name"], "size": item["size"],
                      "kind": "picked", "backend": "flatpak"})
         freed += item["size"]
+    locks, warned = guard.locks(), guard.warns()
     for row in rows:
-        row["protected"] = row["name"].lower() in config.PROTECTED
+        row["locked"] = locks.get(row["name"].lower(), "")
+        row["protected"] = row["name"].lower() in warned
     return {"ok": True, "rows": rows, "count": len(rows), "freed": freed, "missing": missing,
+            "blocked": blocked(rows, locks),
             **risk([r["name"] for r in rows], sum(1 for r in rows if r["kind"] != "unused"))}
 
 
@@ -141,6 +151,14 @@ def remove(keys: list[str], state: Path | None, delete_data: bool, panel: str | 
     reopen = _reopener(panel)
     try:
         rpms, fpks = _split(inventory.lookup(keys))
+        # The panel's review is not the guard; this is. dnf is asked again what
+        # the removal takes, so nothing protected goes as a mere dependency,
+        # whoever calls the engine.
+        if rpms:
+            stopped = blocked(rpm.preview([i["pkg"] for i in rpms])["rows"], guard.locks())
+            if stopped:
+                raise Fail("refusing to remove a protected package: "
+                           + ", ".join(f"{b['name']} ({b['reason']})" for b in stopped))
         steps = []
         if rpms:
             steps.append((rpm.remove_argv([i["pkg"] for i in rpms]), rpms))

@@ -27,11 +27,18 @@ end
 
 local function packageRow(row)
   local name = row.label ~= row.name and `{row.label}  ({row.name})` or row.name
+  local locked = (row.locked or "") ~= ""
+  local mark = ui.box({ width = 14, height = 0 })
+  if locked then
+    mark = ui.glyph({ name = "lock", size = 14, color = "error" })
+  elseif row.protected then
+    mark = ui.glyph({ name = "alert-triangle", size = 14, color = "error" })
+  end
   return ui.row({ key = `pv_{row.backend}_{row.name}`, gap = 8, align = "center", paddingH = 4 }, {
-    row.protected and ui.glyph({ name = "alert-triangle", size = 14, color = "error" })
-      or ui.box({ width = 14, height = 0 }),
+    mark,
     ui.label({ text = name, fontSize = 12, maxLines = 1, flexGrow = 1,
-               color = row.protected and "error" or (row.kind == "picked" and "on_surface" or "on_surface_variant") }),
+               color = (locked or row.protected) and "error"
+                 or (row.kind == "picked" and "on_surface" or "on_surface_variant") }),
     ui.label({ text = size(row.size), fontSize = 11, color = "on_surface_variant", width = 72, textAlign = "end" }),
   })
 end
@@ -58,7 +65,30 @@ local function group(rows, kind, headingKey, hintKey)
   })
 end
 
+-- The guardrail said no. One banner says what and why, and replaces the
+-- warning: a block and a "careful" stacked up read as the same thing.
+local function blockedBanner(P)
+  local lines = {}
+  for _, b in ipairs(P.blocked or {}) do
+    local reason = tr(`lock_{b.reason}`)
+    table.insert(lines, fmt(b.kind == "picked" and "blocked_picked" or "blocked_dependent",
+                            { name = b.label or b.name, reason = reason }))
+  end
+  return ui.row({ key = "blocked", gap = 10, align = "start", padding = 10, radius = 8, border = "error",
+                  borderWidth = 1 }, {
+    ui.glyph({ name = "lock", size = 18, color = "error" }),
+    ui.column({ flexGrow = 1, gap = 4 }, {
+      ui.label({ text = tr("blocked_heading"), fontSize = 13, fontWeight = "semibold", color = "error" }),
+      ui.label({ text = table.concat(lines, "\n"), fontSize = 12, color = "error" }),
+      ui.label({ text = tr("blocked_hint"), fontSize = 11, color = "on_surface_variant" }),
+    }),
+  })
+end
+
 local function warning(P)
+  if #(P.blocked or {}) > 0 then
+    return blockedBanner(P)
+  end
   if not P.risky then
     return ui.box({ height = 0 })
   end
@@ -110,17 +140,24 @@ function M.render(S, A)
       }),
     }))
   end
-  -- A risky removal takes a second, explicit click that says it again.
+  -- A risky removal takes a second, explicit click that says it again. A
+  -- blocked one has no Remove at all, only the way back.
   local count = P ~= nil and P.count or 0
-  local armed = S.armed and P ~= nil and P.risky
+  local isBlocked = P ~= nil and #(P.blocked or {}) > 0
+  local armed = S.armed and P ~= nil and P.risky and not isBlocked
   table.insert(footer, ui.row({ key = `actions_{armed and "armed" or "idle"}`, gap = 8, align = "center" }, {
     ui.label({ text = P ~= nil and fmt("frees", { size = size(P.freed) ~= "" and size(P.freed) or "0 B" }) or "",
                fontSize = 12, color = "on_surface_variant", flexGrow = 1 }),
     ui.button({ key = "back", text = tr("back"), variant = "ghost", controlSize = "sm",
                 onClick = function() A.back() end }),
-    ui.button({ key = "remove", variant = "destructive", enabled = P ~= nil and not S.busy,
-                text = fmt(armed and "remove_confirm" or (count == 1 and "remove_one" or "remove_many"), { n = count }),
+    ui.button({ key = `remove_{isBlocked and "blocked" or "open"}`, variant = "destructive",
+                enabled = P ~= nil and not S.busy and not isBlocked,
+                text = isBlocked and tr("cant_remove")
+                  or fmt(armed and "remove_confirm" or (count == 1 and "remove_one" or "remove_many"), { n = count }),
                 onClick = function()
+                  if isBlocked then
+                    return
+                  end
                   if P ~= nil and P.risky and not S.armed then
                     A.arm()
                   else

@@ -54,6 +54,10 @@ function M.env()
   if #protected > 0 then
     table.insert(vars, `APPMGR_PROTECTED={M.shellQuote(table.concat(protected, ":"))}`)
   end
+  local never = listSetting("never_remove")
+  if #never > 0 then
+    table.insert(vars, `APPMGR_NEVER_REMOVE={M.shellQuote(table.concat(never, ":"))}`)
+  end
   local dirs = {}
   for _, dir in ipairs(listSetting("leftover_dirs")) do
     table.insert(dirs, noctalia.expandPath(dir))
@@ -106,6 +110,11 @@ M.CHECK = 18
 function M.checkbox(checked, enabled)
   return ui.glyph({ name = checked and "square-check-filled" or "square", size = M.CHECK,
                     color = checked and "primary" or (enabled ~= false and "on_surface_variant" or "outline") })
+end
+
+-- In the checkbox's place on a row the guardrail holds back.
+function M.lockbox()
+  return ui.glyph({ name = "lock", size = M.CHECK, color = "outline" })
 end
 
 -- ~/.config/foo reads better than /home/name/.config/foo.

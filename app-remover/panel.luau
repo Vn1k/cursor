@@ -130,6 +130,12 @@ local function loadList()
     end
     S.busy = false
     S.items, S.backends = result.items or {}, result.backends or {}
+    -- A pick that is locked now (added to Never remove since) is dropped.
+    for _, item in ipairs(S.items) do
+      if (item.locked or "") ~= "" then
+        S.picked[item.key] = nil
+      end
+    end
     render()
   end)
 end

@@ -360,6 +360,23 @@ which only read `S` and call `A`. Ported from the GTK app in
   exits (`;`, not `&&`) for a cancelled prompt, where dnf never starts.
   pkexec exits 126/127 when the prompt is dismissed: reported as cancelled,
   and the Flatpak steps are skipped.
+- **The guardrail is `guard.py`, three tiers.** Locked (never removed, not
+  even as a dependency): `/etc/dnf/protected.d`, `core`'s mandatory packages
+  from `libdnf5/comps_groups/core.xml`, the session's packages and
+  `never_remove`. Warned: `standard`'s mandatory packages plus
+  `protected_packages`. Labelled "Came with Fedora": everything in
+  `libdnf5/groups.toml` (preinstalled apps have no entry in `packages.toml`).
+  Every reader returns an empty set when its file is missing.
+  - The session is the engine's ancestors (Noctalia when the panel runs it)
+    plus processes named after `$XDG_CURRENT_DESKTOP` or `noctalia`: Noctalia is
+    started by systemd, so the compositor is never an ancestor.
+    `APPMGR_SESSION_EXES` overrides it (the tests use it).
+  - `inventory._annotate()` stamps `locked`/`preinstalled` after the cache, never
+    into it; `lookup()` refuses a locked key, and `jobs.remove()` asks dnf again
+    what the removal takes before running anything. The panel is not the guard.
+  - The tests point `APPMGR_DNF_STATE`/`APPMGR_DNF_PROTECTED_DIR` at fixtures, and
+    the module header sets them before importing `remover`, since `config` reads
+    the environment once at import.
 - **dnf's output is a terminal progress bar** (`100% | 250.0 B/s | ...`), so
   the panel never shows it as the main view. `jobs.progress()` reads the
   `[n/N]` counter and the package into the state file, the panel draws a

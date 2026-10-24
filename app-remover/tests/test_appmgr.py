@@ -18,8 +18,13 @@ HERE = Path(__file__).resolve().parent
 BIN = HERE.parent / "bin"
 APPMGR = BIN / "appmgr.py"
 sys.path.insert(0, str(BIN))
+# config reads the environment at import: keep this machine's dnf records and
+# session out of the unit tests below.
+os.environ["APPMGR_DNF_STATE"] = tempfile.mkdtemp(prefix="appmgr-nodnf-")
+os.environ["APPMGR_DNF_PROTECTED_DIR"] = os.environ["APPMGR_DNF_STATE"]
+os.environ["APPMGR_SESSION_EXES"] = "/nonexistent/session"
 
-from remover import config, entries, jobs, leftovers, rpm  # noqa: E402
+from remover import config, entries, guard, jobs, leftovers, rpm  # noqa: E402
 from remover.util import parse_size  # noqa: E402
 
 # A real dnf5 answer, trimmed: `dnf remove --assumeno gimp`.
@@ -123,15 +128,40 @@ class World:
         desktop(self.home / ".local/share/applications/script.desktop", "My Script")
         desktop(self.flatpak_exports / "applications/org.example.Notes.desktop", "Notes",
                 **{"X-Flatpak": "org.example.Notes"})
+        # dnf5's records: `bash` is core, `tree` came with a group, `sudo` is on
+        # dnf's protected list, `gimp-help` is standard. The session runs
+        # fakewm (rpm only answers for files that exist).
+        self.wm = tmp / "bin/fakewm"
+        self.wm.parent.mkdir()
+        self.wm.write_text("")
+        self.dnf_state = tmp / "dnf-state"
+        (self.dnf_state / "comps_groups").mkdir(parents=True)
+        self.set_core("bash")
+        (self.dnf_state / "comps_groups/standard.xml").write_text(
+            '<comps><group><id>standard</id><packagelist>'
+            '<packagereq type="mandatory">gimp-help</packagereq></packagelist></group></comps>')
+        (self.dnf_state / "groups.toml").write_text(
+            'version = "1.0"\n[groups]\n[groups.standard]\npackages = ["tree", "gimp-help"]\n')
+        self.protected_dir = tmp / "protected.d"
+        self.protected_dir.mkdir()
+        (self.protected_dir / "sudo.conf").write_text("# keep it\nsudo\n")
         self.spec = {
             "dbpath": str(self.dbpath),
-            "owners": {str(gimp): "gimp|115238502", str(codium): "codium|400000000"},
-            "userinstalled": ["gimp|115238502", "codium|400000000", "tree|100000"],
+            "owners": {str(gimp): "gimp|115238502", str(codium): "codium|400000000",
+                       str(self.wm): "fakewm|10"},
+            "userinstalled": ["gimp|115238502", "codium|400000000", "tree|100000", "bash|1000",
+                              "sudo|500", "fakewm|10"],
             "flatpaks": ["org.example.Notes\tNotes\t12.0 MB\tuser",
                          "org.example.Runtime\tRuntime Thing\t1.0 MB\tsystem"],
             "preview": DNF_GIMP,
         }
         self.save()
+
+    def set_core(self, *mandatory):
+        reqs = "".join(f'<packagereq type="mandatory">{n}</packagereq>' for n in mandatory)
+        (self.dnf_state / "comps_groups/core.xml").write_text(
+            f'<comps><group><id>core</id><packagelist>{reqs}'
+            '<packagereq type="default">tree</packagereq></packagelist></group></comps>')
 
     def save(self):
         self.spec_file.write_text(json.dumps(self.spec))
@@ -145,7 +175,9 @@ class World:
                "XDG_DATA_DIRS": f"{self.system}:{self.flatpak_exports}",
                "FLATPAK_USER_DIR": str(self.home / ".local/share/flatpak"),
                "FLATPAK_SYSTEM_DIR": str(self.flatpak_exports.parent / "flatpak-system"),
-               "FAKE": str(self.spec_file), "FAKE_LOG": str(self.log)}
+               "FAKE": str(self.spec_file), "FAKE_LOG": str(self.log),
+               "APPMGR_DNF_STATE": str(self.dnf_state), "APPMGR_DNF_PROTECTED_DIR": str(self.protected_dir),
+               "APPMGR_SESSION_EXES": str(self.wm)}
         env.update(extra)
         return env
 
@@ -239,7 +271,8 @@ def test_list_apps():
     assert out["backends"]["rpm"]["ok"] and out["cached"] is False
     # One batched owner query, and never `rpm -qa`.
     assert all(c[0] != "-qa" for c in w.calls("rpm"))
-    assert sum(1 for c in w.calls("rpm") if c[0] == "-qf") == 1
+    desktop_batches = [c for c in w.calls("rpm") if c[0] == "-qf" and c[-1].endswith(".desktop")]
+    assert len(desktop_batches) == 1, desktop_batches
 
 
 def test_list_cache():
@@ -284,13 +317,63 @@ def test_preview():
     names = {r["name"]: r for r in out["rows"]}
     assert names["gimp"]["label"] == "GNU Image Manipulation Program"
     assert names["org.example.Notes"]["backend"] == "flatpak"
-    assert out["count"] == 5 and out["risky"] is False
-    assert out["freed"] == 135 * 1024**2 + 12_000_000
+    assert out["count"] == 5 and out["freed"] == 135 * 1024**2 + 12_000_000
+    # gimp-help is mandatory in `standard`: a warning, not a block.
+    assert out["risky"] is True and out["protected"] == ["gimp-help"] and out["blocked"] == []
+    assert names["gimp-help"]["protected"] is True and names["gimp-help"]["locked"] == ""
     # gimp and gimp-help (which needs it) count; the two unused libraries do not.
-    assert w.run("preview", "rpm:gimp", APPMGR_BIG_TRANSACTION="2")["risky"] is False
-    risky = w.run("preview", "rpm:gimp", APPMGR_PROTECTED="babl", APPMGR_BIG_TRANSACTION="1")
-    assert risky["protected"] == ["babl"] and risky["big"] is True and risky["weighty"] == 2
-    assert risky["limit"] == 1
+    big = w.run("preview", "rpm:gimp", APPMGR_PROTECTED="babl", APPMGR_BIG_TRANSACTION="1")
+    assert big["protected"] == ["babl", "gimp-help"] and big["big"] is True and big["weighty"] == 2
+    assert big["limit"] == 1
+    assert w.run("preview", "rpm:gimp", APPMGR_BIG_TRANSACTION="2")["big"] is False
+
+
+def test_guard_locks_priority():
+    w = world()
+    w.set_core("bash", "sudo")
+    env = w.env(APPMGR_NEVER_REMOVE="tree:sudo")
+    code = ("import sys, json; sys.path.insert(0, sys.argv[1]);"
+            "from remover import guard; print(json.dumps(guard.locks()))")
+    out = subprocess.run([sys.executable, "-B", "-c", code, str(BIN)], capture_output=True, text=True, env=env)
+    locks = json.loads(out.stdout)
+    # dnf's own list outranks core, core outranks Never remove.
+    assert locks["sudo"] == "dnf" and locks["bash"] == "core", locks
+    assert locks["fakewm"] == "session" and locks["tree"] == "never", locks
+
+
+def test_list_marks_locked_and_preinstalled():
+    w = world()
+    items = {i["key"]: i for i in w.run("list", "--all")["items"]}
+    assert items["rpm:bash"]["locked"] == "core"
+    assert items["rpm:sudo"]["locked"] == "dnf"
+    assert items["rpm:fakewm"]["locked"] == "session"
+    assert items["rpm:tree"]["preinstalled"] is True and items["rpm:tree"]["locked"] == ""
+    assert items["rpm:gimp"]["locked"] == "" and items["rpm:gimp"]["preinstalled"] is False
+    never = {i["key"]: i for i in w.run("list", "--all", APPMGR_NEVER_REMOVE="gimp")["items"]}
+    assert never["rpm:gimp"]["locked"] == "never"
+
+
+def test_guard_blocks_whole_transaction():
+    w = world()
+    w.set_core("bash", "babl")  # babl only goes as an unused library of gimp
+    out = w.run("preview", "rpm:gimp")
+    assert out["blocked"] == [{"name": "babl", "label": "babl", "kind": "unused", "reason": "core"}]
+    # The engine refuses on its own, before any password is asked.
+    refused = w.run("remove", "rpm:gimp", expect_ok=False)
+    assert "babl (core)" in refused["error"]
+    assert w.calls("pkexec") == [] and not any(c[:2] == ["remove", "-y"] for c in w.calls("dnf"))
+    # A locked package cannot even be asked for.
+    assert "protected" in w.run("preview", "rpm:bash", expect_ok=False)["error"]
+    assert "protected" in w.run("remove", "rpm:fakewm", expect_ok=False)["error"]
+
+
+def test_guard_without_dnf_records():
+    w = world()
+    out = w.run("list", "--all", APPMGR_DNF_STATE=str(w.home / "nothing"),
+                APPMGR_DNF_PROTECTED_DIR=str(w.home / "nothing"))
+    items = {i["key"]: i for i in out["items"]}
+    assert items["rpm:bash"]["locked"] == "" and items["rpm:tree"]["preinstalled"] is False
+    assert items["rpm:fakewm"]["locked"] == "session"  # the session still counts
 
 
 def test_refusals():

@@ -9,7 +9,7 @@ import hashlib
 import json
 import os
 
-from . import config, entries, flatpak, rpm
+from . import config, entries, flatpak, guard, rpm
 from .util import Fail
 
 CACHE_VERSION = 2
@@ -103,6 +103,18 @@ def _signature(mode: str, have: dict) -> str:
     return hashlib.sha1(json.dumps(sig).encode()).hexdigest()
 
 
+def _annotate(items: list[dict]) -> list[dict]:
+    """The guardrail's verdict on each item. Done after the cache, never kept
+    in it: the session that decides some of it changes without the package
+    database noticing (another compositor, Noctalia itself updated)."""
+    locked, preinstalled = guard.locks(), guard.group_installed()
+    for item in items:
+        pkg = item["pkg"] if item["backend"] != "unpackaged" else ""
+        item["locked"] = locked.get(pkg.lower(), "") if pkg else ""
+        item["preinstalled"] = item["backend"] == "rpm" and pkg in preinstalled
+    return items
+
+
 def load(mode: str) -> dict:
     """{backends, items, cached} for "apps" or "packages"."""
     have = backends()
@@ -111,7 +123,7 @@ def load(mode: str) -> dict:
     try:
         cached = json.loads(path.read_text())
         if cached.get("sig") == sig:
-            return {"backends": have, "items": cached["items"], "cached": True}
+            return {"backends": have, "items": _annotate(cached["items"]), "cached": True}
     except (OSError, ValueError, KeyError):
         pass
     items = _apps(have) if mode == "apps" else _packages(have)
@@ -123,7 +135,7 @@ def load(mode: str) -> dict:
         os.replace(tmp, path)
     except OSError:
         pass  # a read-only cache only costs speed
-    return {"backends": have, "items": items, "cached": False}
+    return {"backends": have, "items": _annotate(items), "cached": False}
 
 
 def lookup(keys: list[str]) -> list[dict]:
@@ -140,4 +152,7 @@ def lookup(keys: list[str]) -> list[dict]:
     missing = [k for k in wanted if k not in found]
     if missing:
         raise Fail(f"not installed, or not from a package: {', '.join(missing)}")
+    locked = [f"{found[k]['pkg']} ({found[k]['locked']})" for k in wanted if found[k]["locked"]]
+    if locked:
+        raise Fail(f"refusing to remove a protected package: {', '.join(locked)}")
     return [found[k] for k in wanted]

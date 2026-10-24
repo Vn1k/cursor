@@ -35,13 +35,21 @@ DATA_DIRS = [Path(p) for p in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/sh
              if p.startswith("/")]
 CACHE_DIR = CACHE_HOME / "app-remover"
 
-# Names that mean "you are about to break the machine". dnf's own
-# protected_packages is the hard floor; this only decides whether the review
-# shouts. An empty setting falls back to this list rather than to no warning.
+# Names that make the review shout and ask twice. The ones that are never
+# removed at all are worked out in guard.py; this list only warns. An empty
+# setting falls back to it rather than to no warning.
 DEFAULT_PROTECTED = ("kernel", "kernel-core", "systemd", "glibc", "dnf5", "dnf", "rpm", "niri",
                      "noctalia", "noctalia-shell", "bash", "coreutils", "polkit", "sudo")
 PROTECTED = frozenset(n.lower() for n in (_env_list("APPMGR_PROTECTED") or DEFAULT_PROTECTED))
 BIG_TRANSACTION = _env_int("APPMGR_BIG_TRANSACTION", 10)
+
+# The guardrail's inputs (guard.py). dnf5 keeps its group records as plain
+# files, and dnf's own protected list lives in protected.d.
+DNF_STATE = Path(os.environ.get("APPMGR_DNF_STATE") or "/usr/lib/sysimage/libdnf5")
+DNF_PROTECTED_DIR = Path(os.environ.get("APPMGR_DNF_PROTECTED_DIR") or "/etc/dnf/protected.d")
+NEVER_REMOVE = frozenset(n.lower() for n in _env_list("APPMGR_NEVER_REMOVE"))
+# The executables that run the desktop session, when detecting them misses.
+SESSION_EXES = [p for p in _env_list("APPMGR_SESSION_EXES") if p.startswith("/")]
 
 # Where a removed app's settings and caches are looked for, one level deep.
 # Only folders inside $HOME (and not $HOME itself): Trash is for your files.
