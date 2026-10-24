@@ -409,13 +409,6 @@ local function actionBar()
   })
 end
 
--- Get more has no actions of its own down here, only what is going on.
-local function statusBar()
-  return ui.row({ key = "footer_more", gap = 8, align = "center" }, {
-    ui.label({ text = status, fontSize = 12, color = statusTone, maxLines = 1, flexGrow = 1 }),
-  })
-end
-
 local function detail()
   local theme = themeByName(selected)
   if theme == nil then
@@ -586,8 +579,12 @@ local function moreView()
     }),
     progressLine(),
     ui.scroll({ flexGrow = 1, gap = 6 }, list),
+    -- The last row of the view, like Installed's action bar: what is going on
+    -- (a failed search, say) takes the count's place, so no extra row hangs
+    -- below the pagination.
     ui.row({ gap = 8, align = "center" }, {
-      ui.label({ text = `{total} {tr("results")}`, fontSize = 12, color = "on_surface_variant",
+      ui.label({ text = status ~= "" and status or `{total} {tr("results")}`, fontSize = 12,
+                 color = status ~= "" and statusTone or "on_surface_variant", maxLines = 1,
                  flexGrow = 1 }),
       ui.button({ key = "prev", text = tr("previous"), variant = "ghost", controlSize = "sm",
                   enabled = not busy and page > 0, onClick = "onPrevPage" }),
@@ -620,7 +617,6 @@ render = function()
                   onClick = "onCloseClicked" }),
     }),
     view == "installed" and installedView() or moreView(),
-    view == "more" and statusBar() or nil,
   }))
 end
 
