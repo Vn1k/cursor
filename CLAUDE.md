@@ -338,7 +338,7 @@ which only read `S` and call `A`. Ported from the GTK app in
 `~/Github/app-remover-linux`, which stays as it is. Versions stay `0.y.z` until
 more than dnf is supported: a minor bump per new backend (apt, pacman), 1.0.0
 once those were tried by people on those distros. README's **Other distros**
-asks for that output with a read-only command, tested on Fedora, Debian
+says what works elsewhere and gives a read-only command to include in an issue, tested on Fedora, Debian
 (`podman run --user 65534` from `golang:1.26`) and Arch (`archlinux`); keep
 any change to it dry-run only and out of `$HOME`. The apt and pacman backends
 are planned, not built: `app-remover/docs/backends-apt-pacman.md` is the plan

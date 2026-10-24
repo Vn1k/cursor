@@ -95,14 +95,14 @@ App Remover removes **rpm** packages through dnf (Fedora and its relatives) and
 **Flatpak** apps on any distro, plus launchers no package owns. On Debian,
 Ubuntu, Arch and others the panel lists your Flatpak apps and launchers only.
 
-Support for another package manager is written from that system's real
-output, so if you would like it on yours, open an issue at
-[github.com/Vn1k/cursor](https://github.com/Vn1k/cursor/issues/new) titled
-`app-remover: support <your distro>` and paste what this prints. It only
-reads: no `sudo`, nothing is installed or removed (`apt-get -s`,
-`pacman --print` and `dnf --assumeno` are all dry runs), and it looks at
-system files only, never your home folder. Read the output before you paste
-it all the same. In fish, run `bash` first.
+Support for apt (Debian, Ubuntu) and pacman (Arch) is planned. For another
+distro, or a problem on any of them, open an issue at
+[github.com/Vn1k/cursor](https://github.com/Vn1k/cursor/issues/new) starting
+with `app-remover:`, and include what this prints. It only reads: no `sudo`,
+nothing is installed or removed (`apt-get -s`, `pacman --print` and
+`dnf --assumeno` are all dry runs), and it looks at system files only, never
+your home folder. Read the output before you paste it all the same. In fish,
+run `bash` first.
 
 ```sh
 LC_ALL=C bash <<'EOF' 2>&1
@@ -132,11 +132,8 @@ fi
 EOF
 ```
 
-It prints your distro, which package tools you have, which package owns the
-first launcher in `/usr/share/applications`, a dry run of removing it, and
-the lists that play the part of Fedora's groups and protected packages (see
-**What it will not remove**): packages you installed yourself, and
-`Essential: yes` (Debian) or `HoldPkg` (Arch).
+It prints your distro, your package tools, the owner of one system launcher,
+a dry run of removing it, and the lists the guardrail reads on that system.
 
 ## Notes
 
