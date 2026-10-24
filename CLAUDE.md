@@ -43,7 +43,8 @@ in two files, `catalog.toml` and `<plugin>/plugin.toml`. Keep them in step.
 This repo is where all three are developed. The community-plugins fork
 (`~/Github/community-plugins`) only ever receives the final copy of a plugin
 directory at release time, without its tests (`cursor/test_curmgr.py`,
-`icons/tests/`, `app-remover/tests/`); the fork's own `README.md` is maintained there.
+`icons/tests/`, `app-remover/tests/`, `app-remover/docs/`); the fork's own `README.md` is
+maintained there.
 
 - `cursor/bin/curmgr.py` — the engine. All filesystem and config writes live here.
 - `cursor/panel.luau` / `cursor/shortcut.luau` — UI only. Shells out to curmgr, renders JSON.
@@ -339,7 +340,9 @@ more than dnf is supported: a minor bump per new backend (apt, pacman), 1.0.0
 once those were tried by people on those distros. README's **Other distros**
 asks for that output with a read-only command, tested on Fedora, Debian
 (`podman run --user 65534` from `golang:1.26`) and Arch (`archlinux`); keep
-any change to it dry-run only and out of `$HOME`.
+any change to it dry-run only and out of `$HOME`. The apt and pacman backends
+are planned, not built: `app-remover/docs/backends-apt-pacman.md` is the plan
+to execute, with every rpm-specific spot listed and a container procedure.
 
 - **Never `rpm -qa`.** It took 3 s on every reload. Sizes come from the same
   batched `rpm -qf --qf '%{NAME}|%{SIZE}'` that finds the owners; a file two
