@@ -35,6 +35,7 @@ local folderInfo = {}          -- theme name -> { color (on disk), colors }
 local pendingColor = {}        -- theme name -> folder colour picked, not yet applied
 local failedLayers = {}        -- layer -> reason, from the last apply
 local pendingRemove = ""
+local openFamilies = {}        -- family parent -> open in the sidebar (absent: decided on load)
 local pendingReset = false
 local undone = false           -- after a reset every layer reads "not set"; that is the point
 
@@ -126,6 +127,41 @@ local function themeByName(name)
   return nil
 end
 
+-- Everything that uses `name`'s files, which Remove takes along with it.
+local function dependents(name)
+  local family, queue = {}, { name }
+  while #queue > 0 do
+    local current = table.remove(queue, 1)
+    for _, theme in ipairs(themes) do
+      if theme.name ~= name and table.find(theme.needs or {}, current) ~= nil
+          and table.find(family, theme.name) == nil then
+        table.insert(family, theme.name)
+        table.insert(queue, theme.name)
+      end
+    end
+  end
+  return family
+end
+
+local function isBroken(theme)
+  return theme ~= nil and #(theme.missing or {}) > 0
+end
+
+-- Under its parent "WhiteSur-light" only needs to say "Light".
+local function childLabel(theme)
+  local parent = themeByName(theme.parent)
+  local base = parent ~= nil and parent.title or theme.parent
+  local rest = theme.title
+  if string.lower(string.sub(rest, 1, #base)) == string.lower(base) then
+    rest = string.sub(rest, #base + 1)
+  end
+  rest = string.gsub(rest, "^[%-%s_]+", "")
+  if rest == "" then
+    return theme.title
+  end
+  return string.upper(string.sub(rest, 1, 1)) .. string.sub(rest, 2)
+end
+
 local function inUse(name)
   return current ~= nil and current.theme == name
 end
@@ -193,6 +229,11 @@ end
 
 local function selectTheme(name)
   selected = name
+  -- Keep the selection visible: a variant's family opens around it.
+  local theme = themeByName(name)
+  if theme ~= nil and theme.parent ~= "" and openFamilies[theme.parent] == nil then
+    openFamilies[theme.parent] = true
+  end
   pendingRemove = ""
   loadSpecimen(name)
   render()
@@ -232,28 +273,72 @@ end
 
 -- ── installed view ──────────────────────────────────────────────────────────
 
-local function themeRow(theme)
+local CHEVRON = 22
+
+-- One sidebar row. A family's head carries the chevron that folds its
+-- variants; everything else gets a blank of the same width, so all the names
+-- line up. Children sit one step further in and show only their own part.
+local function themeRow(theme, isChild, children)
   local isSelected = theme.name == selected
-  -- The selection is in the key: the host keeps a prop that a later render
-  -- merely leaves out, so a row that stopped being selected kept its fill.
-  -- A new key builds the row afresh instead.
+  local open = openFamilies[theme.name] == true
+  local broken = isBroken(theme)
+  local lead
+  if #children > 0 then
+    lead = ui.button({
+      key = `chev_{theme.name}_{open and "open" or "shut"}`,
+      glyph = open and "chevron-down" or "chevron-right", variant = "ghost",
+      width = CHEVRON, height = CHEVRON, glyphSize = 14,
+      onClick = function()
+        openFamilies[theme.name] = not open
+        render()
+      end,
+    })
+  else
+    -- An empty column, not a ui.box: a box has a fill of its own, which showed
+    -- as a dark square on the selected row.
+    lead = ui.column({ width = isChild and CHEVRON + 14 or CHEVRON, height = CHEVRON }, {})
+  end
+  local tail = ui.box({ width = 0, height = 0 })
+  if broken then
+    tail = ui.glyph({ name = "alert-triangle", size = 14, color = "tertiary" })
+  elseif inUse(theme.name) then
+    tail = ui.glyph({ name = "check", size = 14, color = "primary" })
+  end
+  -- The state is in the key: the host keeps a prop that a later render merely
+  -- leaves out, so a row that stopped being selected kept its fill.
   return ui.row({
-    key = `theme_{theme.name}_{isSelected and "on" or "off"}`, gap = 8, align = "center",
-    paddingH = 10, paddingV = 8, radius = 8, fill = isSelected and "surface_variant" or nil,
+    key = `theme_{theme.name}_{isSelected and "on" or "off"}`, gap = 4, align = "center",
+    paddingH = 6, paddingV = 6, radius = 8, fill = isSelected and "surface_variant" or nil,
     onClick = function() selectTheme(theme.name) end,
   }, {
-    ui.label({ text = theme.title, fontSize = 13, maxLines = 1, flexGrow = 1,
-               fontWeight = isSelected and "bold" or "normal",
-               color = isSelected and "on_surface" or "on_surface_variant" }),
-    inUse(theme.name) and ui.glyph({ name = "check", size = 14, color = "primary" })
-      or ui.box({ width = 0, height = 0 }),
+    lead,
+    ui.label({ text = isChild and childLabel(theme) or theme.title, fontSize = 13, maxLines = 1,
+               flexGrow = 1, fontWeight = isSelected and "bold" or "normal",
+               color = broken and "tertiary" or (isSelected and "on_surface" or "on_surface_variant") }),
+    tail,
   })
 end
 
 local function themeList()
-  local rows = {}
+  -- Variants under their theme: WhiteSur > dark, light; Papirus > Dark, Light.
+  local children, roots = {}, {}
   for _, theme in ipairs(themes) do
-    table.insert(rows, themeRow(theme))
+    if theme.parent ~= "" and themeByName(theme.parent) ~= nil then
+      children[theme.parent] = children[theme.parent] or {}
+      table.insert(children[theme.parent], theme)
+    else
+      table.insert(roots, theme)
+    end
+  end
+  local rows = {}
+  for _, theme in ipairs(roots) do
+    local kids = children[theme.name] or {}
+    table.insert(rows, themeRow(theme, false, kids))
+    if openFamilies[theme.name] then
+      for _, child in ipairs(kids) do
+        table.insert(rows, themeRow(child, true, {}))
+      end
+    end
   end
   if #rows == 0 then
     rows = { ui.label({ text = busy and tr("loading") or tr("no_themes"), fontSize = 12,
@@ -368,7 +453,8 @@ end
 -- In use *and* every layer agrees: nothing to do, so no faded button that looks
 -- broken. In use but drifted is exactly when Use is needed.
 local function useNeeded()
-  if themeByName(selected) == nil then
+  local theme = themeByName(selected)
+  if theme == nil or isBroken(theme) then
     return false
   end
   return pendingColor[selected] ~= nil
@@ -415,6 +501,14 @@ local function detail()
     return ui.column({ flexGrow = 1, align = "stretch" }, { ui.spacer({ flexGrow = 1 }), actionBar() })
   end
   local armed = pendingRemove == theme.name
+  local family = dependents(theme.name)
+  local familyInUse = false
+  for _, name in ipairs(family) do
+    familyInUse = familyInUse or inUse(name)
+  end
+  local confirm = #family > 0
+    and string.gsub(string.gsub(tr("confirm_remove_family"), "{name}", theme.title), "{n}", tostring(#family))
+    or tr("confirm_remove")
   local header = {
     ui.label({ text = theme.title, fontSize = 22, fontWeight = "bold", maxLines = 1,
                flexGrow = 1 }),
@@ -424,9 +518,10 @@ local function detail()
   end
   if theme.removable then
     table.insert(header, ui.button({
-      key = "remove", text = armed and tr("confirm_remove") or nil,
+      key = `remove_{armed and "armed" or "idle"}`, text = armed and confirm or nil,
       glyph = not armed and "trash" or nil, variant = armed and "destructive" or "ghost",
-      controlSize = "sm", tooltip = tr("remove"), enabled = not busy and not inUse(theme.name),
+      controlSize = "sm", tooltip = familyInUse and tr("in_use_family") or tr("remove"),
+      enabled = not busy and not inUse(theme.name) and not familyInUse,
       onClick = function()
         if armed then
           onRemove(theme.name)
@@ -441,14 +536,24 @@ local function detail()
   -- together never spill over the footer. The title stays put above it.
   return ui.column({ flexGrow = 1, gap = 14, align = "stretch" }, {
     ui.row({ gap = 10, align = "center" }, header),
-    ui.scroll({ flexGrow = 1, gap = 14 }, {
-      (theme.comment or "") ~= "" and ui.label({ text = theme.comment, fontSize = 12, maxLines = 2,
-                                                 color = "on_surface_variant" })
-        or ui.box({ height = 0 }),
-      specimenSheet(),
-      folderColors(),
-      warnings(),
-    }),
+    isBroken(theme)
+      -- Its specimen would be all gaps: say what is wrong and what to do instead.
+      and ui.column({ key = "broken", flexGrow = 1, gap = 8, align = "stretch" }, {
+        ui.label({ text = string.gsub(tr("missing_files"), "{name}", table.concat(theme.missing, ", ")),
+                   fontSize = 13, color = "tertiary" }),
+        -- In use, it cannot be removed - and every icon on screen is broken now.
+        inUse(theme.name)
+          and ui.label({ text = tr("missing_in_use"), fontSize = 13, color = "on_surface" })
+          or ui.box({ height = 0 }),
+      })
+      or ui.scroll({ key = "sheet", flexGrow = 1, gap = 14 }, {
+        (theme.comment or "") ~= "" and ui.label({ text = theme.comment, fontSize = 12, maxLines = 2,
+                                                   color = "on_surface_variant" })
+          or ui.box({ height = 0 }),
+        specimenSheet(),
+        folderColors(),
+        warnings(),
+      }),
     actionBar(),
   })
 end
@@ -806,8 +911,12 @@ function onRemove(name)
       fail(err)
       return
     end
-    setStatus(`{tr("removed")} {name}`, "primary")
-    specimens[name], folderInfo[name] = nil, nil
+    local removed = type(result.removed) == "table" and result.removed or { name }
+    setStatus(`{tr("removed")} {table.concat(removed, ", ")}`, "primary")
+    for _, gone in ipairs(removed) do
+      folderInfo[gone], openFamilies[gone] = nil, nil
+    end
+    specimens = {}
     loadThemes(true)
   end)
 end

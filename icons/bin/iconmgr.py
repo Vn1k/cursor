@@ -144,8 +144,51 @@ def list_themes() -> list[dict]:
                 "path": str(entry),
                 "removable": removable,
                 "folder_color": _folder_color(entry) if removable else "",
+                "needs": sorted(_links_into(entry)),
             }
+    names = {n.lower(): n for n in themes}
+    for theme in themes.values():
+        name = theme["name"]
+        # A variant names itself after its theme: WhiteSur-light, Papirus-Dark,
+        # breeze-dark. The longest such name wins, so Tela-purple-dark goes
+        # under Tela-purple when both are there.
+        parents = [n for low, n in names.items()
+                   if n != name and name.lower().startswith(low + "-")]
+        theme["parent"] = max(parents, key=len) if parents else ""
+        base = Path(theme["path"]).parent
+        theme["missing"] = [n for n in theme["needs"] if not (base / n).is_dir()]
     return sorted(themes.values(), key=lambda t: t["title"].lower())
+
+
+def _links_into(root: Path) -> set[str]:
+    """The sibling themes whose files this one links into.
+
+    WhiteSur-light is little more than links: its apps/, places/ and the rest
+    point at ../WhiteSur/, so removing WhiteSur empties it. Links sit at the
+    top or one level down; deeper ones are within-theme aliases.
+    """
+    base, own = root.parent, root.resolve()
+    found: set[str] = set()
+
+    def visit(folder: Path, depth: int) -> None:
+        try:
+            entries = list(os.scandir(folder))
+        except OSError:
+            return
+        for entry in entries:
+            if entry.is_symlink():
+                target = Path(os.path.normpath(Path(folder) / os.readlink(entry.path)))
+                try:
+                    rel = target.relative_to(base)
+                except ValueError:
+                    continue
+                if rel.parts and rel.parts[0] != root.name and not str(target).startswith(str(own)):
+                    found.add(rel.parts[0])
+            elif depth < 2 and entry.is_dir(follow_symlinks=False):
+                visit(Path(entry.path), depth + 1)
+
+    visit(root, 1)
+    return found
 
 
 @lru_cache(maxsize=None)
@@ -410,6 +453,11 @@ def apply_theme(theme: str) -> dict:
     if not _safe_name(theme):
         raise Fail(f"refusing an unsafe theme name: {theme!r}")
     find_theme(theme)
+    info = next((t for t in list_themes() if t["name"] == theme), None)
+    if info and info["missing"]:
+        gone = ", ".join(info["missing"])
+        raise Fail(f"{theme} uses files from {gone}, which is not installed: "
+                   f"install {gone} again or remove {theme}")
     layers = {
         "gsettings": _layer(_gsettings, "set", "org.gnome.desktop.interface", "icon-theme", theme),
         "gtk": _layer(_set_gtk, theme),
@@ -568,11 +616,32 @@ def install(source: Path, archive_ok: bool = False) -> dict:
 
 
 def remove(theme: str) -> dict:
-    root = find_theme(theme)
-    if not _is_under(root, USER_ICONS):
-        raise Fail(f"only themes in {USER_ICONS} can be removed: {root}")
-    shutil.rmtree(root)
-    return {"ok": True, "removed": theme}
+    """Remove a theme and every variant built on its files.
+
+    Removing WhiteSur alone left WhiteSur-light as a shell of dangling links,
+    and the next apply broke every icon on screen. So the variants go with it,
+    and nothing in the family may be the theme in use.
+    """
+    find_theme(theme)
+    themes = {t["name"]: t for t in list_themes()}
+    family, queue = [], [theme]
+    while queue:
+        name = queue.pop(0)
+        if name in family:
+            continue
+        family.append(name)
+        queue += [n for n, t in themes.items() if name in t["needs"]]
+    current = _gsettings("get", "org.gnome.desktop.interface", "icon-theme")
+    in_use = current.get("value") if current["ok"] else None
+    if in_use in family:
+        raise Fail(f"{in_use} is in use; use another theme before removing {theme}")
+    roots = [find_theme(name) for name in family]
+    for root in roots:
+        if not _is_under(root, USER_ICONS):
+            raise Fail(f"only themes in {USER_ICONS} can be removed: {root}")
+    for root in reversed(roots):  # variants first, the theme they need last
+        shutil.rmtree(root)
+    return {"ok": True, "removed": family}
 
 
 # --------------------------------------------------------------------------

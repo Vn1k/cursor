@@ -297,6 +297,17 @@ files and nothing is rasterised.
   treats a picked colour like a picked theme: nothing is written until Use.
   After a recolour, `_nudge_icon_theme` steps the gsettings value aside and
   back, because GTK only notices a changed theme dir on its next lookup.
+- **Families**: `list` gives each theme a `parent` (the longest other theme name
+  it extends with `-`: WhiteSur-light, Papirus-Dark, breeze-dark), `needs` (the
+  sibling themes its symlinks point into, read from the top two levels only)
+  and `missing`. WhiteSur-light is almost all links into `../WhiteSur/`, and
+  Papirus-Dark/-Light link into Papirus too, so `remove` takes a theme together
+  with everything that needs it, refuses if any of that is in use, and `apply`
+  refuses a theme with `missing`. Removing WhiteSur alone once left its light
+  variant all dangling links, and applying it broke every icon on screen.
+- **`container-tooltip` is plugin_api 32 (v5.2.0)**, above this plugin's 22: on
+  older hosts a tooltip on `ui.box`/`ui.image`/rows is silently dropped. Keep
+  them as extras and put anything the user must know in visible text.
 - **Archives are only unpacked for Get more** (`fetch`). `install` from disk
   takes folders only; the user extracts. Extraction uses tarfile's data filter
   with one change: a link out of the archive is dropped, not fatal.

@@ -28,7 +28,9 @@ from the bar's widget picker; the panel opens right under it), or with:
 noctalia msg panel-toggle vn1k/icons:manager
 ```
 
-**Installed** lists every icon theme on the system. Pick one and the right
+**Installed** lists every icon theme on the system, with variants folded
+under their theme (Papirus > Dark, Light; Breeze > Dark); the arrow opens a
+family. Pick one and the right
 side shows its own icons for folders, files, apps and system status, so you see
 what you get before using it. **Use this theme** applies it everywhere; the
 theme in use carries a check mark. If some places still use another theme, the
@@ -47,6 +49,12 @@ first, then choose the folder.
 or Top rated. Click a result to see its files, and **Install** one; the
 download runs in the background and the new theme opens in Installed when it is
 done.
+
+Many variants are mostly links into their base theme (WhiteSur-light into
+WhiteSur, Papirus-Dark into Papirus), so **Remove** on a theme also removes the
+variants built on it, and says so before it does; nothing in that family may be
+the theme in use. A variant whose base theme is gone is flagged in the list and
+cannot be used: get the base theme again from Get more, or remove it.
 
 **Reset to system icons**, at the bottom of Installed, removes the icon theme
 the plugin set and goes back to the system default. The first click explains

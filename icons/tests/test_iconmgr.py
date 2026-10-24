@@ -10,6 +10,7 @@ import http.server
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -71,6 +72,16 @@ def make_papirus(root, colors=("blue", "red"), current="blue", sizes=("48x48", "
                              ("user-home", f"user-{current}-home")):
             (places / f"{link}.svg").symlink_to(f"{target}.svg")
         (places / "network-server.svg").symlink_to("folder-remote.svg")  # not ours to touch
+    return root
+
+
+def make_variant(root, parent):
+    """A WhiteSur-light: an index.theme, and its icons a link into the parent."""
+    root.mkdir(parents=True)
+    (root / "index.theme").write_text(
+        f"[Icon Theme]\nName={root.name}\nInherits=hicolor\nDirectories=48x48/places\n"
+        "\n[48x48/places]\nSize=48\nType=Fixed\n")
+    (root / "48x48").symlink_to(f"../{parent}/48x48")
     return root
 
 
@@ -206,6 +217,77 @@ def test_remove_only_touches_user_themes():
         run(["remove", "Mine"], home)
         assert not (user_icons(home) / "Mine").exists()
         assert "only themes in" in run(["remove", "Sys"], home, expect_ok=False)["error"]
+
+
+# ------------------------------------------------------------ families
+def test_variants_have_a_parent_and_needs():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        icons = user_icons(home)
+        make_theme(icons / "Family")
+        make_variant(icons / "Family-dark", "Family")
+        make_variant(icons / "Family-light", "Family")
+        make_theme(icons / "Lonely-dark")
+        make_theme(icons / "Plain-Dark")
+        make_theme(icons / "Plain")
+        themes = {t["name"]: t for t in run(["list"], home)["themes"]}
+        assert themes["Family-dark"]["parent"] == "Family", themes["Family-dark"]
+        assert themes["Family-dark"]["needs"] == ["Family"] and themes["Family-dark"]["missing"] == []
+        assert themes["Plain-Dark"]["parent"] == "Plain" and themes["Plain-Dark"]["needs"] == []
+        assert themes["Lonely-dark"]["parent"] == "", "no parent installed, no parent"
+        assert themes["Family"]["parent"] == "" and themes["Family"]["needs"] == []
+
+
+def test_removing_a_parent_takes_its_variants():
+    """Removing WhiteSur alone left WhiteSur-light all dangling links."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        icons = user_icons(home)
+        make_theme(icons / "Family")
+        make_variant(icons / "Family-dark", "Family")
+        make_variant(icons / "Family-light", "Family")
+        make_theme(icons / "Other")
+        removed = run(["remove", "Family"], home)["removed"]
+        assert sorted(removed) == ["Family", "Family-dark", "Family-light"], removed
+        assert sorted(p.name for p in icons.iterdir()) == ["Other"]
+        # Removing just a variant leaves its theme alone.
+        make_theme(icons / "Family")
+        make_variant(icons / "Family-dark", "Family")
+        assert run(["remove", "Family-dark"], home)["removed"] == ["Family-dark"]
+        assert (icons / "Family").is_dir()
+
+
+def test_a_family_in_use_is_not_removed():
+    if not shutil.which("gsettings"):
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        icons = user_icons(home)
+        make_theme(icons / "Family")
+        make_variant(icons / "Family-dark", "Family")
+        # memory backend: the value lives as long as this one process does
+        fake = home / "fakebin"
+        fake.mkdir()
+        (fake / "gsettings").write_text("#!/bin/sh\n[ \"$1\" = get ] && echo \"'Family-dark'\"\nexit 0\n")
+        (fake / "gsettings").chmod(0o755)
+        path = f"{fake}{os.pathsep}{os.environ['PATH']}"
+        error = run(["remove", "Family"], home, expect_ok=False, path=path)["error"]
+        assert "Family-dark is in use" in error, error
+        assert (icons / "Family").is_dir() and (icons / "Family-dark").is_symlink() is False
+        assert (icons / "Family-dark").is_dir()
+
+
+def test_a_theme_with_missing_files_is_not_applied():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        icons = user_icons(home)
+        make_theme(icons / "Family")
+        make_variant(icons / "Family-light", "Family")
+        shutil.rmtree(icons / "Family")  # removed by hand, the way it broke before
+        theme = run(["list"], home)["themes"][0]
+        assert theme["name"] == "Family-light" and theme["missing"] == ["Family"], theme
+        error = run(["apply", "Family-light"], home, expect_ok=False)["error"]
+        assert "uses files from Family, which is not installed" in error, error
 
 
 # ------------------------------------------------------------ Papirus folders
