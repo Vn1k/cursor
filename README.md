@@ -130,6 +130,13 @@ each. Click one, choose a size, press **Apply**. **Hide when typing** makes the
 cursor disappear while you type, and **Hide after ms** hides it after that many
 milliseconds of not moving.
 
+**Reset to system cursor**, small at the bottom of the same tab, takes back
+everything the plugin set: the compositor configs return exactly as they were,
+its own files are deleted, and the cursor goes back to the system default. Your
+installed themes stay. It explains itself and asks once more before doing
+anything. Removing the plugin in Noctalia's settings does the same reset on its
+own.
+
 **Install theme** is for themes you downloaded. Most of them are a folder with a
 `cursors/` folder inside — point this at it and it gets installed for your user
 only. Underneath is the list of themes this plugin installed,
@@ -137,11 +144,6 @@ imported or built, each with a delete button: the first click arms it, the
 second one deletes. Only themes it put there can be deleted — anything from
 `/usr/share/icons` or `~/.icons` is left alone, so you cannot break what you
 installed another way.
-
-At the bottom, **Undo** takes back everything the plugin changed: the
-compositor configs return exactly as they were, its own files are deleted, and
-the cursor goes back to the system default. Your themes stay. Like delete, the
-first click arms it.
 
 **Import Windows** converts a Windows cursor pack. Nearly every pack includes an
 `Install.inf` file, and when it does everything is figured out for you, animated

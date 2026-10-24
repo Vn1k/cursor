@@ -42,9 +42,10 @@ local installPath = ""
 -- Deleting a theme is destructive and a dialog would dismiss the panel, so the
 -- confirmation is the button itself: first click arms, second click removes.
 local pendingRemove = ""
--- Undo resets every layer the plugin wrote; armed the same way as Remove.
-local pendingUninstall = false
--- After an undo every layer reads "not set" or the system default, which is
+-- Reset to system cursor undoes everything the plugin wrote. Armed the same
+-- way as Remove, but with its consequences spelled out and a way back out.
+local pendingReset = false
+-- After a reset every place reads "not set" or the system default, which is
 -- the point - so the drift warning stays quiet until the next apply.
 local undone = false
 -- Layers the last apply could not write (name -> reason). "Applied" alone hid
@@ -90,21 +91,9 @@ local function tr(key)
   return noctalia.tr(key)
 end
 
-local function shellQuote(s)
-  return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
-end
-
-local function trim(s)
-  return noctalia.string.trim(tostring(s or ""))
-end
-
-local function configString(key, fallback)
-  local value = noctalia.getConfig(key)
-  if type(value) == "string" and value ~= "" then
-    return value
-  end
-  return fallback
-end
+local shared = require("./shared.luau")
+local shellQuote, trim = shared.shellQuote, shared.trim
+local configString, pathEnv = shared.configString, shared.pathEnv
 
 -- The engine ships inside the plugin, so a store install needs nothing on
 -- PATH; the setting only exists for a checkout that keeps curmgr elsewhere.
@@ -118,42 +107,6 @@ local function engine()
     return `python3 -B {shellQuote(dir .. "/bin/curmgr.py")}`
   end
   return "curmgr"
-end
-
--- The path settings reach the engine as env vars rather than flags, so a
--- keybind can export the same names with the shell stopped. Only the ones set
--- are sent; an empty one leaves the engine on its XDG default.
-local PATH_SETTINGS = {
-  install_dir = "CURMGR_INSTALL_DIR",
-  niri_config = "CURMGR_NIRI_CONFIG",
-  hyprland_config = "CURMGR_HYPRLAND_CONFIG",
-  sway_config = "CURMGR_SWAY_CONFIG",
-  mango_config = "CURMGR_MANGO_CONFIG",
-  umbriel_config = "CURMGR_UMBRIEL_CONFIG",
-}
-
-local function pathEnv()
-  local env = ""
-  for key, var in pairs(PATH_SETTINGS) do
-    local value = trim(configString(key, ""))
-    if value ~= "" then
-      env ..= `{var}={shellQuote(noctalia.expandPath(value))} `
-    end
-  end
-  local dirs = {}
-  local list = noctalia.getConfig("icon_dirs")
-  if type(list) == "table" then
-    for _, dir in ipairs(list) do
-      local d = trim(dir)
-      if d ~= "" then
-        table.insert(dirs, noctalia.expandPath(d))
-      end
-    end
-  end
-  if #dirs > 0 then
-    env ..= `CURMGR_ICON_DIRS={shellQuote(table.concat(dirs, ":"))} `
-  end
-  return env
 end
 
 local function imageArgs()
@@ -456,6 +409,14 @@ local function sortedKeys(t)
   return keys
 end
 
+-- "xdg_default" is how the engine names a layer, not something a user has ever
+-- heard of. A missing translation (a new compositor) falls back to the name.
+local function layerName(name)
+  local key = `layer_{name}`
+  local label = tr(key)
+  return (label ~= nil and label ~= key) and label or name
+end
+
 -- The value most layers agree on. Deliberately not current.theme: that is the
 -- first compositor's value, so when the compositor is the one that drifted it
 -- would name every *other* layer as the odd one out.
@@ -490,7 +451,7 @@ local function driftWarning()
     local value = current.layers[name]
     if value ~= expected then
       table.insert(rows, ui.label({
-        text = ("%s: %s"):format(name, value ~= "" and value or tr("not_set")),
+        text = ("%s: %s"):format(layerName(name), value ~= "" and value or tr("not_set")),
         fontSize = 11, color = "tertiary",
       }))
     end
@@ -512,10 +473,40 @@ local function failedWarning()
     }),
   }
   for _, name in ipairs(names) do
-    table.insert(rows, ui.label({ text = `{name}: {failedLayers[name]}`, fontSize = 11,
+    table.insert(rows, ui.label({ text = `{layerName(name)}: {failedLayers[name]}`, fontSize = 11,
                                   color = "tertiary", maxLines = 1 }))
   end
   return ui.column({ gap = 2, align = "stretch" }, rows)
+end
+
+-- Secondary and destructive, so it stays small until asked for. Armed, it says
+-- exactly what it will do before the second click does it.
+local function resetFooter()
+  if not pendingReset then
+    return ui.row({ gap = 8, align = "center" }, {
+      ui.spacer({ flexGrow = 1 }),
+      ui.button({ key = "reset", text = tr("reset"), glyph = "arrow-back-up",
+                  variant = "ghost", controlSize = "sm", enabled = not busy,
+                  onClick = function()
+                    pendingReset = true
+                    render()
+                  end }),
+    })
+  end
+  return ui.column({ gap = 8, align = "stretch" }, {
+    ui.label({ text = tr("reset_explain"), fontSize = 12, color = "on_surface_variant" }),
+    ui.row({ gap = 8, align = "center" }, {
+      ui.spacer({ flexGrow = 1 }),
+      ui.button({ key = "reset_cancel", text = tr("cancel"), variant = "ghost",
+                  controlSize = "sm",
+                  onClick = function()
+                    pendingReset = false
+                    render()
+                  end }),
+      ui.button({ key = "reset_confirm", text = tr("reset_confirm"), variant = "destructive",
+                  controlSize = "sm", enabled = not busy, onClick = "onReset" }),
+    }),
+  })
 end
 
 local function themesTab()
@@ -539,6 +530,7 @@ local function themesTab()
       ui.button({ key = "apply", text = tr("apply"), variant = "primary",
                   onClick = "onApply", enabled = not busy and selected ~= "" }),
     }),
+    resetFooter(),
   })
 end
 
@@ -796,7 +788,6 @@ local function removableRows()
       local armed = pendingRemove == name
       table.insert(rows, ui.row({ key = `rm_{name}`, gap = 8, align = "center" }, {
         ui.label({ text = theme.title or name, fontSize = 13, maxLines = 1, flexGrow = 1 }),
-        ui.label({ text = tostring(theme.count), fontSize = 11, color = "on_surface_variant" }),
         ui.button({
           key = `rmbtn_{name}`,
           text = armed and tr("confirm_remove") or nil,
@@ -839,25 +830,6 @@ local function installTab()
     ui.separator({}),
     ui.label({ text = tr("installed_themes"), fontSize = 12, fontWeight = "bold" }),
     ui.scroll({ flexGrow = 1, gap = 6 }, removableRows()),
-    ui.separator({}),
-    ui.row({ gap = 8, align = "center" }, {
-      ui.label({ text = tr("uninstall_hint"), fontSize = 12, color = "on_surface_variant",
-                 flexGrow = 1 }),
-      ui.button({
-        key = "uninstall",
-        text = pendingUninstall and tr("confirm_uninstall") or tr("uninstall"),
-        variant = pendingUninstall and "destructive" or "outline",
-        controlSize = "sm", enabled = not busy,
-        onClick = function()
-          if pendingUninstall then
-            onUninstall()
-          else
-            pendingUninstall = true
-            render()
-          end
-        end,
-      }),
-    }),
   })
 end
 
@@ -1002,13 +974,13 @@ function onRemoveTheme(name)
   end)
 end
 
-function onUninstall()
+function onReset()
   if busy then
     return
   end
   busy = true
-  pendingUninstall = false
-  setStatus(tr("uninstalling"))
+  pendingReset = false
+  setStatus(tr("resetting"))
   render()
 
   call("uninstall", function(result, err)
@@ -1019,13 +991,19 @@ function onUninstall()
     busy = false
     undone = true
     failedLayers = {}
-    local failed = sortedKeys(type(result.failed) == "table" and result.failed or {})
-    if #failed > 0 then
-      setStatus(`{tr("uninstalled_partly")} {table.concat(failed, ", ")}`, "tertiary")
-    else
-      setStatus(tr("uninstalled"), "primary")
+    -- The old pick would stay highlighted over the theme that is no longer
+    -- applied; empty, loadCurrent() adopts what the reset left active.
+    selected = ""
+    local failed = {}
+    for _, name in ipairs(sortedKeys(type(result.failed) == "table" and result.failed or {})) do
+      table.insert(failed, layerName(name))
     end
-    noctalia.notify(tr("title"), tr("uninstalled"))
+    if #failed > 0 then
+      setStatus(`{tr("reset_partly")} {table.concat(failed, ", ")}`, "tertiary")
+    else
+      setStatus(tr("reset_done"), "primary")
+    end
+    noctalia.notify(tr("title"), tr("reset_done"))
     loadThemes()
   end)
 end
@@ -1081,11 +1059,12 @@ function onApply()
     failedLayers = type(result.failed) == "table" and result.failed or {}
     local failed = sortedKeys(failedLayers)
     if #failed > 0 then
-      setStatus(`{tr("applied_partly")} {table.concat(failed, ", ")}`, "tertiary")
-      local lines = {}
+      local names, lines = {}, {}
       for _, name in ipairs(failed) do
-        table.insert(lines, `{name}: {failedLayers[name]}`)
+        table.insert(names, layerName(name))
+        table.insert(lines, `{layerName(name)}: {failedLayers[name]}`)
       end
+      setStatus(`{tr("applied_partly")} {table.concat(names, ", ")}`, "tertiary")
       noctalia.notify(tr("title"), `{selected}. {tr("applied_partly")}\n{table.concat(lines, "\n")}`)
     else
       setStatus(tr("applied"), "primary")

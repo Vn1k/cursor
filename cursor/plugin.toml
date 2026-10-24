@@ -1,7 +1,7 @@
 id = "vn1k/cursor"
 name = "Cursor"
-version = "1.0.5"
-plugin_api = 8
+version = "1.0.6"
+plugin_api = 17
 author = "Vn1k"
 license = "MIT"
 icon = "pointer"
@@ -122,3 +122,9 @@ dismiss_on_outside_click = true
 [[shortcut]]
 id = "shortcut"
 entry = "shortcut.luau"
+
+# Headless: resets the cursor when the plugin is removed (onExit "uninstall",
+# plugin_api 17). Runs nothing otherwise.
+[[service]]
+id = "lifecycle"
+entry = "service.luau"

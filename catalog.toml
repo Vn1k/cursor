@@ -6,13 +6,13 @@
 [[plugin]]
 id = "vn1k/cursor"
 name = "Cursor"
-version = "1.0.5"
-updated_at = 1792815201
+version = "1.0.6"
+updated_at = 1792818258
 added_at = 1789971395
 author = "Vn1k"
 license = "MIT"
 icon = "pointer"
 description = "Pick, import and build cursor themes, then apply them everywhere at once."
 deprecated = false
-plugin_api = 8
+plugin_api = 17
 tags = ["panel", "shortcut", "theming", "utility", "niri", "hyprland", "sway", "mangowc", "umbriel"]
