@@ -631,8 +631,8 @@ def remove(theme: str) -> dict:
             continue
         family.append(name)
         queue += [n for n, t in themes.items() if name in t["needs"]]
-    current = _gsettings("get", "org.gnome.desktop.interface", "icon-theme")
-    in_use = current.get("value") if current["ok"] else None
+    # The theme Noctalia shows: gsettings, else GTK's settings.ini.
+    in_use = read_current()["theme"]
     if in_use in family:
         raise Fail(f"{in_use} is in use; use another theme before removing {theme}")
     roots = [find_theme(name) for name in family]
@@ -690,9 +690,18 @@ def folders(theme: str, color: str | None) -> dict:
         raise Fail(f"{theme} has no {color} folders")
     if not _is_under(root, USER_ICONS) or not os.access(root, os.W_OK):
         raise Fail(f"{theme} belongs to the system; install it from Get more to recolour it")
+    # A size dir or places/ may itself be a link. Into a sibling theme is what a
+    # variant is and stays inside USER_ICONS; anywhere else is not ours to
+    # rewrite. All checked before the first write, so nothing is half done.
+    places_dirs = list(dict.fromkeys(p.resolve() for p in _places_dirs(root)))
+    for places in places_dirs:
+        if not _is_under(places, USER_ICONS):
+            raise Fail(f"refusing to write outside {USER_ICONS}: {places}")
+        if not os.access(places, os.W_OK):
+            raise Fail(f"{places} is read-only; nothing was changed")
     pattern = re.compile(rf"^(folder|user)-{re.escape(current)}(-.+)?\.svg$")
     changed = 0
-    for places in _places_dirs(root):
+    for places in places_dirs:
         for link in places.iterdir():
             if not link.is_symlink():
                 continue
@@ -766,6 +775,9 @@ def browse(query: str, sort: str, page: int) -> dict:
     payload = _ocs("content/data", params)
     items = []
     for item in payload.get("data") or []:
+        # The panel names preview files after the id, so only a plain number passes.
+        if not re.fullmatch(r"\d+", str(item.get("id"))):
+            continue
         items.append({
             "id": str(item.get("id")), "name": item.get("name", ""),
             "author": item.get("personid", ""), "summary": item.get("summary", ""),

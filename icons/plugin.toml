@@ -1,6 +1,6 @@
 id = "vn1k/icons"
 name = "Icons"
-version = "1.0.0"
+version = "1.0.1"
 # The highest level any entry uses: require() of shared.luau is 22, the
 # uninstall hook (service-lifecycle) 17.
 plugin_api = 22

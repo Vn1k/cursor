@@ -277,6 +277,21 @@ def test_a_family_in_use_is_not_removed():
         assert (icons / "Family-dark").is_dir()
 
 
+def test_in_use_without_gsettings_is_not_removed():
+    """No gsettings: Noctalia reads the theme from GTK's settings.ini instead."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        icons = user_icons(home)
+        make_theme(icons / "Family")
+        make_variant(icons / "Family-dark", "Family")
+        bare = home / "bin"
+        bare.mkdir()
+        run(["apply", "Family-dark"], home, path=str(bare))
+        error = run(["remove", "Family"], home, expect_ok=False, path=str(bare))["error"]
+        assert "Family-dark is in use" in error, error
+        assert (icons / "Family").is_dir() and (icons / "Family-dark").is_dir()
+
+
 def test_a_theme_with_missing_files_is_not_applied():
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
@@ -330,6 +345,26 @@ def test_system_papirus_is_not_recolored():
         assert os.readlink(root / "48x48/places/folder.svg") == "folder-blue.svg"
 
 
+def test_recoloring_never_writes_outside_user_icons():
+    """A theme installed from a folder keeps its links, and one whose places/
+    linked out had folder.svg re-pointed in a directory that was not ours."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        icons = user_icons(home)
+        outside = make_papirus(home / "outside/Ext")
+        escape = make_theme(icons / "Escape", icons={"48x48/places": []})
+        (escape / "48x48/places").rmdir()
+        (escape / "48x48/places").symlink_to(outside / "48x48/places")
+        error = run(["folders", "Escape", "red"], home, expect_ok=False)["error"]
+        assert "outside" in error, error
+        assert os.readlink(outside / "48x48/places/folder.svg") == "folder-blue.svg"
+        # A variant's links into its sibling theme stay inside, so that still works.
+        make_papirus(icons / "Papirus")
+        make_variant(icons / "Papirus-Dark", "Papirus")
+        assert run(["folders", "Papirus-Dark", "red"], home)["changed"] == 3
+        assert os.readlink(icons / "Papirus/48x48/places/folder.svg") == "folder-red.svg"
+
+
 # ------------------------------------------------------------ gnome-look
 class FakeOcs(http.server.BaseHTTPRequestHandler):
     """Just enough of the OCS API, plus the archive and pling's first-hit stall."""
@@ -366,7 +401,10 @@ class FakeOcs(http.server.BaseHTTPRequestHandler):
             return self._json({"status": "ok", "statuscode": 100, "data": [item]})
         if self.path.startswith("/content/data?"):
             assert "categories=132" in self.path and "format=json" in self.path, self.path
-            return self._json({"status": "ok", "statuscode": 100, "totalitems": 1, "data": [item]})
+            # The panel makes a file name of the id, so a bad one must not get through.
+            hostile = {**item, "id": "../../x"}
+            return self._json({"status": "ok", "statuscode": 100, "totalitems": 1,
+                               "data": [item, hostile]})
         if self.path.startswith("/file/"):
             FakeOcs.hits[self.path] = FakeOcs.hits.get(self.path, 0) + 1
             if FakeOcs.hits[self.path] == 1:
@@ -397,6 +435,7 @@ def test_browse_lists_items_and_only_archive_files():
             result = run(["browse", "--query", "fake"], home, extra_env=env)
         finally:
             server.shutdown()
+        assert [i["id"] for i in result["items"]] == ["42"], "a non-numeric id is dropped"
         item = result["items"][0]
         assert result["total"] == 1 and item["name"] == "Fake Icons" and item["downloads"] == 1234
         assert [f["name"] for f in item["files"]] == ["fake.tar.gz", "fake.zip"], item["files"]
