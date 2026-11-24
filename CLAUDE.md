@@ -55,8 +55,9 @@ directory at release time, without its tests (`cursor/test_curmgr.py`,
   `<data>/curmgr.py.uninstall.json`. A plugin removed while already disabled gets no `onExit`,
   which is why the panel keeps its **Reset to system cursor** button. This needs
   `service-lifecycle` (level 17).
-- `plugin_api` is the highest level any entry uses, currently **22** for `require()` of
-  `shared.luau` (`module-require`). The store validator checks only some features (not
+- `plugin_api` is the highest level any entry uses, currently **43** for the
+  `surface_container` / `outline_variant` palette roles (the maintainer's rename
+  in community-plugins 1.0.8; `require()` of `shared.luau` alone is 22). The store validator checks only some features (not
   `require`), so check new APIs against `docs/plugin-api.json` in the noctalia repo.
 - `cursor/plugin.toml` — Noctalia manifest (panel, control-centre tile, settings keys).
 - `cursor/translations/{en,id}.json` — every UI string. Single-segment keys are flat;
@@ -157,6 +158,11 @@ mtime is bumped because niri watches it, not the included file.
 - Hyprland and Mango have `validate: None`; see the `ponytail:` comments.
   Hyprland also gets `hyprctl setcursor` in its reload argv, which is what moves
   the pointer now rather than at next login.
+- Hyprland 0.57 moved to `hyprland.lua` and ignores `hyprland.conf` once the
+  `.lua` exists, so `HYPRLAND_CONFIG` prefers the `.lua` and the row swaps in
+  Lua fields (`cursor.lua`, `dofile(...)`, `--` comments) by suffix. Still one
+  `hyprland` layer. Before this, an apply on 0.57 reported ok with no Hyprland
+  layer at all and the pointer never changed.
 
 ### Building themes
 

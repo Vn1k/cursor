@@ -526,7 +526,7 @@ def test_theme_names_with_spaces_and_quotes_survive_every_compositor():
         (home / ".config/niri").mkdir(parents=True)
         (home / ".config/niri/config.kdl").write_text(MINIMAL_NIRI)
         for config_rel, body, *_ in COMPOSITOR_CASES.values():
-            (home / ".config" / config_rel).parent.mkdir(parents=True)
+            (home / ".config" / config_rel).parent.mkdir(parents=True, exist_ok=True)
             (home / ".config" / config_rel).write_text(body)
 
         result = run(["apply", name, "--size", "32"], home=home)
@@ -1029,6 +1029,13 @@ COMPOSITOR_CASES = {
         ["env = XCURSOR_THEME,Adwaita", "env = XCURSOR_SIZE,32",
          "hide_on_key_press = true", "inactive_timeout = 3"],
     ),
+    # Hyprland 0.57+: same layer name, Lua config.
+    "hyprland.lua": (
+        "hypr/hyprland.lua", 'hl.env("XCURSOR_SIZE", "24")\n', "hypr/cursor.lua",
+        'dofile("{cursor}")',
+        ['hl.env("XCURSOR_THEME", "Adwaita")', 'hl.env("XCURSOR_SIZE", "32")',
+         "hide_on_key_press = true,", "inactive_timeout = 3,"],
+    ),
     "sway": (
         "sway/config", "bindsym $mod+t exec foot\n", "sway/cursor.conf",
         "include {cursor}",
@@ -1053,6 +1060,7 @@ COMPOSITOR_CASES = {
 def check_compositor(name):
     """Seed one compositor's config, apply, and check what landed."""
     config_rel, body, cursor_rel, include, expected = COMPOSITOR_CASES[name]
+    name = name.split(".")[0]  # "hyprland.lua" reports as the hyprland layer
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
         config = home / ".config" / config_rel
@@ -1066,7 +1074,7 @@ def check_compositor(name):
         assert result["layers"][name]["ok"], result["layers"][name]
 
         written = cursor.read_text()
-        assert written.startswith("# Managed by"), (name, written)
+        assert written.split(" ", 1)[1].startswith("Managed by"), (name, written)
         for line in expected:
             assert line in written, (name, line, written)
 
@@ -1088,6 +1096,25 @@ def check_compositor(name):
 
 def test_apply_hyprland():
     check_compositor("hyprland")
+
+
+def test_apply_hyprland_lua():
+    check_compositor("hyprland.lua")
+
+
+def test_hyprland_lua_wins_over_a_leftover_conf():
+    """Hyprland 0.57 ignores hyprland.conf once hyprland.lua exists. Writing the
+    .conf there was the "everything says applied, nothing changes" bug."""
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        hypr = home / ".config/hypr"
+        hypr.mkdir(parents=True)
+        (hypr / "hyprland.conf").write_text("bind = SUPER, T, exec, foot\n")
+        (hypr / "hyprland.lua").write_text('hl.env("XCURSOR_SIZE", "24")\n')
+        assert run(["apply", "Adwaita"], home=home)["layers"]["hyprland"]["ok"]
+        assert (hypr / "hyprland.conf").read_text() == "bind = SUPER, T, exec, foot\n"
+        assert 'dofile("' in (hypr / "hyprland.lua").read_text()
+        assert run(["current"], home=home)["layers"]["hyprland"] == "Adwaita"
 
 
 def test_apply_sway():

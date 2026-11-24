@@ -133,7 +133,7 @@
     },
     "hyprland_config": {
       "label": "Hyprland config",
-      "description": "Leave empty for ~/.config/hypr/hyprland.conf. cursor.conf is written beside it."
+      "description": "Leave empty for ~/.config/hypr/hyprland.lua, or hyprland.conf when there is no .lua. cursor.lua / cursor.conf is written beside it."
     },
     "sway_config": {
       "label": "Sway config",

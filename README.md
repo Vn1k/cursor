@@ -20,7 +20,7 @@ you are running, so your cursor is still right after you switch:
 | Compositor | File it writes | Picks it up |
 | --- | --- | --- |
 | niri | `~/.config/niri/cursor.kdl` | right away (niri watches its config) |
-| Hyprland | `~/.config/hypr/cursor.conf` | right away (`hyprctl setcursor`) |
+| Hyprland | `~/.config/hypr/cursor.lua` (0.57+), or `cursor.conf` beside a `hyprland.conf` | right away (`hyprctl setcursor`) |
 | Sway | `~/.config/sway/cursor.conf` | right away (`swaymsg reload`) |
 | Mango | `~/.config/mango/cursor.conf` | right away (`mmsg dispatch reload_config`) |
 | Umbriel | `~/.config/umbriel/cursor.toml` | right away (Umbriel watches its config) |
@@ -182,7 +182,7 @@ In Noctalia's settings, under Plugins › Cursor.
 | Engine path | empty | Leave it empty. Only needed if you moved the engine somewhere unusual. |
 | Extra theme folders | empty | More folders to look for cursor themes in. `~/.local/share/icons`, `~/.icons`, `$XCURSOR_PATH` and `$XDG_DATA_DIRS/icons` are always searched. |
 | Install folder | `~/.local/share/icons` | Where imported, built and installed themes go, and the only place **Remove** deletes from. It must be inside your home folder. Anywhere else than the default, apps find it through `XCURSOR_PATH` after the next login. |
-| niri / Hyprland / Sway / MangoWC / Umbriel config | `~/.config/…` | The compositor's main config, if yours lives elsewhere. The managed `cursor.kdl` / `cursor.conf` / `cursor.toml` is written next to it. |
+| niri / Hyprland / Sway / MangoWC / Umbriel config | `~/.config/…` | The compositor's main config, if yours lives elsewhere. The managed `cursor.kdl` / `cursor.conf` / `cursor.lua` / `cursor.toml` is written next to it. |
 
 From a keybind or script, the same paths are the env vars `CURMGR_ICON_DIRS`,
 `CURMGR_INSTALL_DIR` and `CURMGR_{NIRI,HYPRLAND,SWAY,MANGO,UMBRIEL}_CONFIG`.
